@@ -1937,8 +1937,11 @@ void inven_hover_on(int btn, int keyCode)
             int v5 = 0;
             int v6 = 0;
             gmouse_3d_pick_frame_hot(&v5, &v6);
-
+#ifdef __3DS__
+            InventoryCursorData* cursorData = &(imdata[INVENTORY_WINDOW_CURSOR_ARROW]);
+#else
             InventoryCursorData* cursorData = &(imdata[INVENTORY_WINDOW_CURSOR_PICK]);
+#endif
             mouse_set_shape(cursorData->frmData, cursorData->width, cursorData->height, cursorData->width, v5, v6, 0);
 
             if (a2a != last_target) {

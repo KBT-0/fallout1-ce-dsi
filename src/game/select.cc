@@ -60,10 +60,17 @@ namespace fallout {
 #define CS_WINDOW_BACK_BUTTON_X 461
 #define CS_WINDOW_BACK_BUTTON_Y 425
 
+#ifdef __3DS__
+#define CS_WINDOW_NAME_MID_X 128
+#define CS_WINDOW_PRIMARY_STAT_MID_X 148
+#define CS_WINDOW_SECONDARY_STAT_MID_X 129
+#define CS_WINDOW_BIO_X 220
+#else
 #define CS_WINDOW_NAME_MID_X 318
 #define CS_WINDOW_PRIMARY_STAT_MID_X 348
 #define CS_WINDOW_SECONDARY_STAT_MID_X 365
 #define CS_WINDOW_BIO_X 420
+#endif
 
 typedef enum PremadeCharacter {
     PREMADE_CHARACTER_NARG,
@@ -95,7 +102,11 @@ static unsigned char* select_window_buffer = NULL;
 static unsigned char* monitor = NULL;
 
 // 0x507988
+#ifdef __3DS__
+static Rect monitor_rect = { 0, 30, 400, 240 };
+#else
 static Rect monitor_rect = { 40, 30, 599, 329 };
+#endif
 
 // 0x507998
 static int previous_button = -1;
@@ -298,8 +309,9 @@ int select_character()
         renderPresent();
         sharedFpsLimiter.throttle();
     }
-
+#ifndef __3DS__
     palette_fade_to(black_palette);
+#endif
     select_exit();
 
     if (cursorWasHidden) {
@@ -348,14 +360,32 @@ bool select_init()
     monitor = (unsigned char*)mem_malloc(CS_WINDOW_BACKGROUND_WIDTH * CS_WINDOW_BACKGROUND_HEIGHT);
     if (monitor == NULL)
         return select_fatal_error(false);
+#ifdef __3DS__
+    trans_cscale(backgroundFrmData,
+        CS_WINDOW_WIDTH,
+        290,
+        CS_WINDOW_WIDTH,
+        select_window_buffer,
+        400,
+        240,
+        CS_WINDOW_WIDTH);
 
+    trans_cscale(backgroundFrmData + CS_WINDOW_WIDTH * CS_WINDOW_BACKGROUND_Y + CS_WINDOW_BACKGROUND_X,
+        CS_WINDOW_BACKGROUND_WIDTH,
+        CS_WINDOW_BACKGROUND_HEIGHT,
+        CS_WINDOW_WIDTH,
+        monitor,
+        350,
+        240,
+        CS_WINDOW_BACKGROUND_WIDTH);
+#else
     buf_to_buf(backgroundFrmData + CS_WINDOW_WIDTH * CS_WINDOW_BACKGROUND_Y + CS_WINDOW_BACKGROUND_X,
         CS_WINDOW_BACKGROUND_WIDTH,
         CS_WINDOW_BACKGROUND_HEIGHT,
         CS_WINDOW_WIDTH,
         monitor,
         CS_WINDOW_BACKGROUND_WIDTH);
-
+#endif
     art_ptr_unlock(backgroundFrmHandle);
 
     int fid;
@@ -691,14 +721,23 @@ static bool select_update_display()
         debug_printf("\n ** Error in dude init! **\n");
         return false;
     }
-
+#ifdef __3DS__
+    trans_cscale(monitor,
+        350,
+        240,
+        CS_WINDOW_BACKGROUND_WIDTH,
+        select_window_buffer + CS_WINDOW_WIDTH * CS_WINDOW_BACKGROUND_Y + (CS_WINDOW_BACKGROUND_X-15),
+        350,
+        240,
+        CS_WINDOW_WIDTH);
+#else
     buf_to_buf(monitor,
         CS_WINDOW_BACKGROUND_WIDTH,
         CS_WINDOW_BACKGROUND_HEIGHT,
         CS_WINDOW_BACKGROUND_WIDTH,
         select_window_buffer + CS_WINDOW_WIDTH * CS_WINDOW_BACKGROUND_Y + CS_WINDOW_BACKGROUND_X,
         CS_WINDOW_WIDTH);
-
+#endif
     bool success = false;
     if (select_display_portrait()) {
         if (select_display_stats()) {
@@ -731,14 +770,23 @@ static bool select_display_portrait()
             for (y = 1; y < height; y += 2) {
                 memset(data + y * width, 0, width);
             }
-
+#ifdef __3DS__
+            trans_cscale(data,
+                width,
+                height,
+                width,
+                select_window_buffer + CS_WINDOW_WIDTH * (215 - height) + 135 - (width / 2),
+                40,
+                40,
+                CS_WINDOW_WIDTH);
+#else
             trans_buf_to_buf(data,
                 width,
                 height,
                 width,
                 select_window_buffer + CS_WINDOW_WIDTH * (240 - height) + 150 - (width / 2),
                 CS_WINDOW_WIDTH);
-
+#endif
             old_font = text_curr();
             text_font(101);
 
@@ -775,7 +823,9 @@ static bool select_display_stats()
 
     int vh = text_height();
     int y = 40;
-
+#ifdef __3DS__
+    vh -= 2;
+#endif
     // NAME
     str = object_name(obj_dude);
     strcpy(text, str);
@@ -1024,12 +1074,18 @@ static bool select_display_bio()
     if (stream != NULL) {
         int y = 40;
         int lineHeight = text_height();
-
+#ifdef __3DS__
+        lineHeight -= 2;
+#endif
         char string[256];
         while (db_fgets(string, 256, stream) && y < 260) {
             text_to_buf(select_window_buffer + CS_WINDOW_WIDTH * y + CS_WINDOW_BIO_X,
                 string,
+#ifdef __3DS__
+                CS_WINDOW_WIDTH - CS_WINDOW_BIO_X+130,
+#else
                 CS_WINDOW_WIDTH - CS_WINDOW_BIO_X,
+#endif
                 CS_WINDOW_WIDTH,
                 colorTable[992]);
             y += lineHeight;

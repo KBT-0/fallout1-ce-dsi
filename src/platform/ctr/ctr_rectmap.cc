@@ -289,19 +289,23 @@ void ctr_rectmap_init()
     addRectMap(DISPLAY_INVENTORY_USE,     0,  80,   0, 290, 375,  52,   0, 215, 240); // single small inventory
     addRectMap(DISPLAY_INVENTORY_LOOT,    0,  95,  10, 505, 360,   0,   0, 320, 240);
 
-    addRectMap(DISPLAY_INVENTORY_TRADE,   0,  88, 290, 460, 192,   0,  80, 320, 160); // during barter
-    addRectMap(DISPLAY_INVENTORY_TRADE,   1,   0, 420,  80,  60,  80,   0,  80,  60); // offer
-    addRectMap(DISPLAY_INVENTORY_TRADE,   2, 560, 420,  80,  60, 160,   0,  80,  60); // talk
-    addRectMap(DISPLAY_INVENTORY_TRADE,   3,   0, 290,  80, 140,   0,   0,  60,  80); // during barter
-    addRectMap(DISPLAY_INVENTORY_TRADE,   4, 560, 290,  80, 140, 260,   0,  60,  80); // during barter
+    addRectMap(DISPLAY_INVENTORY_TRADE,   0,  88, 290, 460, 190,   0,  80, 320, 160); // during barter
+    addRectMap(DISPLAY_INVENTORY_TRADE,   1,   5, 425,  75,  55,  80,   0,  80,  55); // offer
+    addRectMap(DISPLAY_INVENTORY_TRADE,   2, 560, 425,  75,  55, 163,   0,  80,  55); // talk
+    addRectMap(DISPLAY_INVENTORY_TRADE,   3,   5, 293,  83, 137,   0,   0,  73,  80); // during barter
+    addRectMap(DISPLAY_INVENTORY_TRADE,   4, 555, 293,  83, 137, 250,   0,  73,  80); // during barter
 
     addRectMap(DISPLAY_WORLDMAP,          0,   0,   0, 640, 480,   0,   0, 320, 240);
     addRectMap(DISPLAY_PIPBOY,            0,   0,   0, 640, 480,   0,   0, 320, 240);
 
-    addRectMap(DISPLAY_CHAR_SELECT,       0,   0,   0, 640, 480,   0,   0, 320, 240); // char selection at game start
+    addRectMap(DISPLAY_CHAR_SELECT_TOP,   0,   0,   0, 400, 240,   0,   0, 400, 240);
+    addRectMap(DISPLAY_CHAR_SELECT,       0, 282, 319,  69,  20, 120, 200,  69,  20); // prev / next
+    addRectMap(DISPLAY_CHAR_SELECT,       0,  67, 316,  44,  27,  70, 142,  44,  27); // take
+    addRectMap(DISPLAY_CHAR_SELECT,       0, 421, 313,  44,  27,  70, 111,  44,  27); // modify
+    addRectMap(DISPLAY_CHAR_SELECT,       0,  66, 418,  44,  27,  70,  80,  44,  27); // create
+    addRectMap(DISPLAY_CHAR_SELECT,       0, 447, 418,  44,  27,  70,  32,  44,  27); // back
 
     addRectMap(DISPLAY_CHAR_TOP,          0, 335, 257, 300, 190,   0,   0, 400, 240);
-
     addRectMap(DISPLAY_CHAR,              0,  10,  30, 320, 210,   0,   0, 320, 210); // left
     addRectMap(DISPLAY_CHAR,              1, 340,   0, 320, 240,   0,   0, 320, 240); // right
     addRectMap(DISPLAY_CHAR,              2,  10,   0, 320,  30,   0, 210, 320,  30); // name / age / sex

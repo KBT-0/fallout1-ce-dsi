@@ -3926,6 +3926,7 @@ static int about_process_input(int input)
     case KEY_RETURN:
 #ifdef __3DS__
         {
+            about_reset_string();
             text_font(101);
             int count = 0;
 
@@ -4103,8 +4104,9 @@ static void about_process_string()
             }
         }
     }
-
+#ifndef __3DS__
     about_reset_string();
+#endif
     about_update_display(1);
 }
 

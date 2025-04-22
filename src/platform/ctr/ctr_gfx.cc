@@ -294,8 +294,15 @@ void drawRects()
             }
             break;
 
-        case DISPLAY_OPTIONS:
         case DISPLAY_CHAR_SELECT:
+            drawRect(rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->src_x, rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->src_y,
+                    rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->src_w, rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->src_h,
+                    rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->dst_x, rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->dst_y,
+                    rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->dst_w, rectMaps[DISPLAY_CHAR_SELECT_TOP][0]->dst_h
+            );
+            break;
+
+        case DISPLAY_OPTIONS:
         case DISPLAY_WORLDMAP:
         case DISPLAY_PIPBOY:
         case DISPLAY_FULL:
@@ -320,7 +327,12 @@ void drawRects()
         case DISPLAY_INVENTORY_TRADE:
         case DISPLAY_WORLDMAP:
             drawFrameRect();
-
+            break;
+        case DISPLAY_CHAR_SELECT:
+            C3D_TexBind(0, &static_tex);
+            drawRect_tex(0, 240, 320, 240, 0, 0, 320, 240);
+            C3D_TexBind(0, &render_tex);
+            break;
         default:
             break;
     }
