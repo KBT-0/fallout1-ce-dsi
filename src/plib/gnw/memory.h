@@ -9,11 +9,20 @@ typedef void*(MallocFunc)(size_t size);
 typedef void*(ReallocFunc)(void* ptr, size_t newSize);
 typedef void(FreeFunc)(void* ptr);
 
+typedef struct MemoryStats {
+    int currentBlocks;
+    int peakBlocks;
+    size_t currentBytes;
+    size_t peakBytes;
+} MemoryStats;
+
 char* mem_strdup(const char* string);
 void* mem_malloc(size_t size);
 void* mem_realloc(void* ptr, size_t size);
 void mem_free(void* ptr);
 void mem_check();
+void mem_get_stats(MemoryStats* stats);
+void mem_reset_peak_stats();
 void mem_register_func(MallocFunc* mallocFunc, ReallocFunc* reallocFunc, FreeFunc* freeFunc);
 
 #if defined __3DS__ && _DEBUG_OVERLAY

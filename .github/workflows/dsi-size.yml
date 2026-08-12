@@ -1,0 +1,236 @@
+name: DSi Phase 0 size feasibility
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Makefile.dsi"
+      - "src/**"
+      - "third_party/**"
+      - "scripts/ci-dsi-size.sh"
+      - ".github/workflows/dsi-size.yml"
+      - "PROJECT_v3.md"
+
+permissions:
+  contents: read
+
+jobs:
+  dsi-size:
+    runs-on: ubuntu-latest
+
+    # Pinned published devkitPro image for reproducible Phase 0 measurements.
+    container:
+      image: devkitpro/devkitarm:20260610
+
+    env:
+      CI_OUT: build/ci
+      EXPECTED_ELF: build/fallout1-dsi-feasibility.elf
+      EXPECTED_MAP: build/fallout1-dsi-feasibility.map
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Mark workspace safe for container git
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Ensure Nintendo DS development packages
+        id: ndsdev
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "${CI_OUT}"
+
+          need_nds_dev=0
+          if [[ ! -d "${DEVKITPRO:-/opt/devkitpro}/libnds" ]]; then
+            echo "libnds directory missing"
+            need_nds_dev=1
+          fi
+          if ! command -v ndstool >/dev/null 2>&1; then
+            echo "ndstool missing"
+            need_nds_dev=1
+          fi
+
+          if [[ "${need_nds_dev}" -eq 1 ]]; then
+            if command -v dkp-pacman >/dev/null 2>&1; then
+              dkp-pacman -S --needed --noconfirm nds-dev
+            else
+              echo "dkp-pacman not found; cannot auto-install nds-dev"
+            fi
+          fi
+
+          # Fallout CE's maintained 3DS build links zlib. For DS this is
+          # supplied by the nds-zlib portlib package. Install when absent.
+          DS_PORTLIBS="${PORTLIBS:-${DEVKITPRO:-/opt/devkitpro}/portlibs/nds}"
+          if [[ ! -f "${DS_PORTLIBS}/lib/libz.a" ]]; then
+            if command -v dkp-pacman >/dev/null 2>&1; then
+              dkp-pacman -S --needed --noconfirm nds-zlib || true
+            fi
+          fi
+
+      - name: Record toolchain, libnds and source state
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "${CI_OUT}"
+
+          {
+            echo "=== git ==="
+            git rev-parse HEAD || true
+            git status --short || true
+
+            echo
+            echo "=== environment ==="
+            echo "DEVKITPRO=${DEVKITPRO:-UNSET}"
+            echo "DEVKITARM=${DEVKITARM:-UNSET}"
+            echo "LIBNDS=${LIBNDS:-UNSET}"
+            echo "PORTLIBS=${PORTLIBS:-UNSET}"
+            echo "PATH=${PATH}"
+
+            echo
+            echo "=== toolchain ==="
+            command -v arm-none-eabi-g++ || true
+            arm-none-eabi-g++ --version || true
+            command -v arm-none-eabi-size || true
+            arm-none-eabi-size --version || true
+            make --version | head -n 2 || true
+
+            echo
+            echo "=== libnds ==="
+            ls -la "${DEVKITPRO:-/opt/devkitpro}/libnds" 2>&1 || true
+            find "${DEVKITPRO:-/opt/devkitpro}/libnds" -maxdepth 2 -type f 2>/dev/null | head -n 50 || true
+
+            echo
+            echo "=== ndstool ==="
+            command -v ndstool || true
+            ndstool -h 2>&1 | head -n 30 || true
+
+            echo
+            echo "=== installed DS packages ==="
+            if command -v dkp-pacman >/dev/null 2>&1; then
+              dkp-pacman -Q 2>/dev/null | grep -E '^(devkitARM|devkitarm|libnds|calico|nds-|ndstool)' || true
+            fi
+
+            echo
+            echo "=== feasibility inputs ==="
+            test -f Makefile.dsi && echo "Makefile.dsi: present" || echo "Makefile.dsi: MISSING"
+            test -f src/platform/dsi/feasibility/include/SDL.h && echo "SDL feasibility header: present" || echo "SDL feasibility header: MISSING"
+            test -f src/platform/dsi/feasibility/sdl_feasibility_stubs.cc && echo "SDL feasibility implementation: present" || echo "SDL feasibility implementation: MISSING"
+          } | tee "${CI_OUT}/environment.txt"
+
+      - name: Produce source-wide SDL inventory
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "${CI_OUT}"
+
+          if [[ -d src ]]; then
+            grep -RhoE \
+              --include='*.c' --include='*.cc' --include='*.cpp' \
+              --include='*.h' --include='*.hpp' \
+              'SDL_[A-Za-z0-9_]+' src \
+              | sort -u \
+              > "${CI_OUT}/sdl-symbols.txt" || true
+
+            grep -RInE \
+              --include='*.c' --include='*.cc' --include='*.cpp' \
+              --include='*.h' --include='*.hpp' \
+              '(^|[^A-Za-z0-9_])SDL_[A-Za-z0-9_]+' src \
+              > "${CI_OUT}/sdl-call-sites.txt" || true
+          else
+            echo "src/ directory not found" > "${CI_OUT}/sdl-symbols.txt"
+            echo "src/ directory not found" > "${CI_OUT}/sdl-call-sites.txt"
+          fi
+
+      - name: Build DSi feasibility target
+        id: build
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          set -o pipefail
+          mkdir -p "${CI_OUT}"
+
+          make -f Makefile.dsi feasibility-all V=1 2>&1 | tee "${CI_OUT}/build.log"
+          status=${PIPESTATUS[0]}
+          echo "${status}" > "${CI_OUT}/build-exit-code.txt"
+          exit "${status}"
+
+      - name: Collect ELF, size and linker-map evidence
+        if: always()
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "${CI_OUT}/maps"
+
+          elf=""
+          if [[ -f "${EXPECTED_ELF}" ]]; then
+            elf="${EXPECTED_ELF}"
+          else
+            elf="$(find build . -maxdepth 6 -type f -name '*.elf' 2>/dev/null | head -n 1)"
+          fi
+
+          {
+            echo "RESULT_CLASS=LOWER_BOUND"
+            echo "EXPECTED_ELF=${EXPECTED_ELF}"
+            echo "EXPECTED_MAP=${EXPECTED_MAP}"
+            echo "FOUND_ELF=${elf:-NONE}"
+            echo
+            if [[ -n "${elf}" && -f "${elf}" ]]; then
+              echo "=== arm-none-eabi-size ==="
+              arm-none-eabi-size "${elf}" || true
+              echo
+              echo "=== arm-none-eabi-size -A ==="
+              arm-none-eabi-size -A "${elf}" || true
+            else
+              echo "No ELF was produced. See build.log for the first real ARM9 compiler/linker blocker."
+            fi
+          } | tee "${CI_OUT}/size.txt"
+
+          {
+            echo "=== linker maps found ==="
+            find . -maxdepth 6 -type f -name '*.map' -print 2>/dev/null || true
+          } | tee "${CI_OUT}/maps-found.txt"
+
+          while IFS= read -r mapfile; do
+            [[ -z "${mapfile}" ]] && continue
+            cp -f "${mapfile}" "${CI_OUT}/maps/$(basename "${mapfile}")" || true
+          done < <(find . -maxdepth 6 -type f -name '*.map' -print 2>/dev/null)
+
+          if [[ -n "${elf}" && -f "${elf}" ]]; then
+            cp -f "${elf}" "${CI_OUT}/$(basename "${elf}")" || true
+          fi
+
+      - name: Upload Phase 0 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsi-phase0-size-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/ci/**
+            build/**/*.map
+            build/**/*.elf
+            *.map
+            *.elf
+
+      - name: Enforce feasibility build result
+        if: always()
+        shell: bash
+        run: |
+          status="$(cat "${CI_OUT}/build-exit-code.txt" 2>/dev/null || echo 1)"
+          if [[ "${status}" -ne 0 ]]; then
+            echo "DSi feasibility build failed with exit code ${status}."
+            exit "${status}"
+          fi
+
+          test -s "${EXPECTED_ELF}"
+          test -s "${EXPECTED_MAP}"

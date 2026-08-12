@@ -1,0 +1,211 @@
+# Fallout 1 CE — Nintendo DSi Phase 0 feasibility build
+#
+# Purpose:
+#   Compile/link as much real Fallout 1 CE core code as possible for ARM9/DSi
+#   while temporarily replacing SDL/platform-facing calls with a minimal shim.
+#
+# This target is a LOWER BOUND size probe, not a playable port.
+# It intentionally does NOT build an .nds runtime image yet.
+#
+# Expected outputs:
+#   build/fallout1-dsi-feasibility.elf
+#   build/fallout1-dsi-feasibility.map
+
+.SUFFIXES:
+
+ifeq ($(strip $(DEVKITARM)),)
+$(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>devkitARM")
+endif
+
+TOPDIR := $(CURDIR)
+include $(DEVKITARM)/ds_rules
+.DEFAULT_GOAL := feasibility
+
+# devkitPro's shell setup normally exports these. Resolve them from DEVKITARM
+# as a fallback so the target also works in the official container image.
+ifeq ($(strip $(DEVKITPRO)),)
+DEVKITPRO := $(abspath $(DEVKITARM)/..)
+endif
+ifeq ($(strip $(LIBNDS)),)
+LIBNDS := $(DEVKITPRO)/libnds
+endif
+ifeq ($(strip $(PORTLIBS)),)
+PORTLIBS := $(DEVKITPRO)/portlibs/nds
+endif
+
+# -----------------------------------------------------------------------------
+# Output contract consumed by .github/workflows/dsi-size.yml
+# -----------------------------------------------------------------------------
+BUILD      := build
+CONFIG     ?= optimized
+
+ifeq ($(CONFIG),baseline)
+OBJDIR     := $(BUILD)/feasibility_obj_baseline
+TARGET     := fallout1-dsi-feasibility-baseline
+SECTION_FLAGS :=
+GC_LDFLAGS :=
+else ifeq ($(CONFIG),optimized)
+OBJDIR     := $(BUILD)/feasibility_obj
+TARGET     := fallout1-dsi-feasibility
+SECTION_FLAGS := -ffunction-sections -fdata-sections
+GC_LDFLAGS := -Wl,--gc-sections
+else
+$(error "CONFIG must be 'baseline' or 'optimized'")
+endif
+
+ELF        := $(BUILD)/$(TARGET).elf
+MAP        := $(BUILD)/$(TARGET).map
+
+# -----------------------------------------------------------------------------
+# Source layout mirrors the maintained 3DS Makefile's Fallout core directories,
+# but deliberately excludes src/platform/ctr and substitutes the Phase 0 DSi
+# feasibility shim.
+# -----------------------------------------------------------------------------
+CORE_DIRS := \
+	src \
+	src/game \
+	src/int \
+	src/int/support \
+	src/plib/assoc \
+	src/plib/color \
+	src/plib/db \
+	src/plib/gnw \
+	third_party/fpattern/vendor
+
+FEAS_DIR := src/platform/dsi/feasibility
+SOURCE_DIRS := $(CORE_DIRS) $(FEAS_DIR)
+
+CORE_C_SOURCES   := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.c))
+CORE_CC_SOURCES  := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cc))
+CORE_CPP_SOURCES := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cpp))
+STUB_C_SOURCES   := $(wildcard $(FEAS_DIR)/*.c)
+STUB_CC_SOURCES  := $(wildcard $(FEAS_DIR)/*.cc)
+STUB_CPP_SOURCES := $(wildcard $(FEAS_DIR)/*.cpp)
+C_SOURCES   := $(CORE_C_SOURCES) $(STUB_C_SOURCES)
+CC_SOURCES  := $(CORE_CC_SOURCES) $(STUB_CC_SOURCES)
+CPP_SOURCES := $(CORE_CPP_SOURCES) $(STUB_CPP_SOURCES)
+
+C_OBJECTS   := $(patsubst %.c,$(OBJDIR)/%.o,$(C_SOURCES))
+CC_OBJECTS  := $(patsubst %.cc,$(OBJDIR)/%.o,$(CC_SOURCES))
+CPP_OBJECTS := $(patsubst %.cpp,$(OBJDIR)/%.o,$(CPP_SOURCES))
+OBJECTS     := $(C_OBJECTS) $(CC_OBJECTS) $(CPP_OBJECTS)
+DEPS        := $(OBJECTS:.o=.d)
+
+# -----------------------------------------------------------------------------
+# ARM9 target settings copied from the current official devkitPro DS ARM9
+# template. Do NOT import the 3DS fork's ARMv6K/mpcore/hard-float flags.
+# -----------------------------------------------------------------------------
+ARCH := -march=armv5te -mtune=arm946e-s
+
+COMMON_FLAGS := \
+	-g \
+	-Wall \
+	-Os \
+	$(SECTION_FLAGS) \
+	-fomit-frame-pointer \
+	$(ARCH)
+
+# Keep C++ ABI overhead conservative for the first lower-bound link, matching
+# the 3DS port's no-RTTI/no-exceptions policy while retaining GNU++17.
+CFLAGS   := $(COMMON_FLAGS)
+CXXFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -std=gnu++17
+
+# Stub include path MUST be first so <SDL.h> resolves to the feasibility shim.
+FEAS_INCLUDE := $(TOPDIR)/$(FEAS_DIR)/include
+
+INCLUDE_FLAGS := \
+	-I$(FEAS_INCLUDE) \
+	$(foreach d,$(CORE_DIRS),-I$(TOPDIR)/$(d)) \
+	-I$(LIBNDS)/include
+
+ifneq ($(strip $(PORTLIBS)),)
+INCLUDE_FLAGS += -I$(PORTLIBS)/include
+endif
+
+CPPFLAGS := \
+	$(INCLUDE_FLAGS) \
+	-DARM9 \
+	-D__NDS__ \
+	-Dunix \
+	-DFALLOUT_DSI_FEASIBILITY=1 \
+	-DSDL_MAIN_HANDLED
+
+# ds_arm9.specs is the supported ARM9 link model from devkitARM.
+# The linker map path is fixed to the exact filename required by PROJECT_v3.
+LDFLAGS := \
+	-specs=ds_arm9.specs \
+	-g \
+	$(ARCH) \
+	$(GC_LDFLAGS) \
+	-Wl,--cref \
+	-Wl,-Map,$(abspath $(MAP))
+
+LIBPATHS := -L$(LIBNDS)/lib
+LIBPATHS += -L$(PORTLIBS)/lib
+
+# Fallout CE's maintained 3DS build links zlib. nds-zlib is supplied through
+# devkitPro portlibs; CI attempts to install it when absent.
+LIBS := -lz -lnds9 -lm
+
+.PHONY: all feasibility feasibility-all feasibility-baseline clean print-feasibility-config
+
+all: feasibility
+
+# PROJECT_v3 §5 requires both a conservative baseline and the section-GC
+# optimized lower bound. The exact optimized ELF name remains the CI contract.
+feasibility-all:
+	$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) CONFIG=baseline feasibility
+	$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) CONFIG=optimized feasibility
+
+feasibility-baseline:
+	$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) CONFIG=baseline feasibility
+
+# Explicit target required by PROJECT_v3 §5/§32 and the CI workflow.
+feasibility: print-feasibility-config $(ELF)
+	@echo
+	@echo "Feasibility ELF: $(ELF)"
+	@echo "Linker map:     $(MAP)"
+	@echo "RESULT CLASS:   LOWER BOUND"
+
+print-feasibility-config:
+	@echo "=== Fallout 1 CE DSi feasibility build ==="
+	@echo "DEVKITARM=$(DEVKITARM)"
+	@echo "DEVKITPRO=$(DEVKITPRO)"
+	@echo "LIBNDS=$(LIBNDS)"
+	@echo "PORTLIBS=$(PORTLIBS)"
+	@echo "CONFIG=$(CONFIG)"
+	@echo "ARCH=$(ARCH)"
+	@echo "CXX=$(CXX)"
+	@echo "Core source files: $(words $(CORE_C_SOURCES) $(CORE_CC_SOURCES) $(CORE_CPP_SOURCES))"
+	@echo "Stub source files: $(words $(STUB_C_SOURCES) $(STUB_CC_SOURCES) $(STUB_CPP_SOURCES))"
+
+$(ELF): $(OBJECTS)
+	@mkdir -p $(dir $@)
+	@echo "LINK $@"
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(LIBPATHS) $(LIBS) -o $@
+
+$(OBJDIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "CC   $<"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+$(OBJDIR)/%.o: %.cc
+	@mkdir -p $(dir $@)
+	@echo "CXX  $<"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+$(OBJDIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "CXX  $<"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+clean:
+	@rm -rf \
+		$(BUILD)/feasibility_obj \
+		$(BUILD)/feasibility_obj_baseline \
+		$(BUILD)/fallout1-dsi-feasibility.elf \
+		$(BUILD)/fallout1-dsi-feasibility.map \
+		$(BUILD)/fallout1-dsi-feasibility-baseline.elf \
+		$(BUILD)/fallout1-dsi-feasibility-baseline.map
+
+-include $(DEPS)
