@@ -130,10 +130,11 @@ CPPFLAGS := \
 	-DFALLOUT_DSI_FEASIBILITY=1 \
 	-DSDL_MAIN_HANDLED
 
-# ds_arm9.specs is the supported ARM9 link model from devkitARM.
-# The linker map path is fixed to the exact filename required by PROJECT_v3.
+# Current ds_rules translates ds_arm9.specs to Calico's DS9 runtime specs and
+# appends libcalico_ds9 for implicit links. This explicit link recipe must make
+# the same contract visible itself.
 LDFLAGS := \
-	-specs=ds_arm9.specs \
+	-specs=$(CALICO)/share/ds9.specs \
 	-g \
 	$(ARCH) \
 	$(GC_LDFLAGS) \
@@ -144,10 +145,11 @@ LDFLAGS := \
 # rewrite it from LIBDIRS. Keep this feasibility link's paths isolated.
 FEAS_LIBPATHS := -L$(LIBNDS)/lib
 FEAS_LIBPATHS += $(foreach d,$(PORTLIBS),-L$(d)/lib)
+FEAS_LIBPATHS += -L$(CALICO)/lib
 
 # Fallout CE's maintained 3DS build links zlib. nds-zlib is supplied through
 # devkitPro portlibs; CI attempts to install it when absent.
-LIBS := -lz -lnds9 -lm
+LIBS := -lz -lnds9 -lcalico_ds9 -lm
 
 .PHONY: all feasibility feasibility-all feasibility-baseline clean print-feasibility-config
 
