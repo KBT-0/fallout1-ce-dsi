@@ -56,7 +56,7 @@ LDFLAGS := \
 	-Wl,--cref \
 	-Wl,-Map,$(abspath $(MAP))
 
-LIBPATHS := -L$(LIBNDS)/lib $(foreach d,$(PORTLIBS),-L$(d)/lib) -L$(CALICO)/lib
+BENCH_LIBPATHS := -L$(LIBNDS)/lib $(foreach d,$(PORTLIBS),-L$(d)/lib) -L$(CALICO)/lib
 LIBS := -lfat -lnds9 -lcalico_ds9 -lm
 
 .PHONY: all dsi-bench clean print-config
@@ -87,7 +87,7 @@ $(NDS): $(ELF) $(ARM7_ELF) $(ICON)
 $(ELF): $(OBJECTS)
 	@mkdir -p $(dir $@)
 	@echo "LINK $@"
-	$(CXX) $(LDFLAGS) $(OBJECTS) $(LIBPATHS) $(LIBS) -o $@
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(BENCH_LIBPATHS) $(LIBS) -o $@
 
 $(OBJDIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
