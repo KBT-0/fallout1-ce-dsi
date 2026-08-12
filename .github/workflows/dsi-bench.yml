@@ -7,6 +7,8 @@ on:
       - "Makefile.dsi-bench"
       - "src/platform/dsi/bench/**"
       - "tests/dsi_rectmap_test.cpp"
+      - "tests/dsi_asset_dat_test.cpp"
+      - "tests/dsi_stubs/nds.h"
       - "scripts/ci-dsi-bench.sh"
       - "scripts/test-dsi-bench-host.sh"
       - ".github/workflows/dsi-bench.yml"
@@ -43,7 +45,7 @@ jobs:
             dkp-pacman -S --needed --noconfirm nds-dev
           fi
 
-      - name: Run host rectmap self-test
+      - name: Run host benchmark self-tests
         shell: bash
         run: bash scripts/test-dsi-bench-host.sh
 

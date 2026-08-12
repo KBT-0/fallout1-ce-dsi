@@ -237,6 +237,16 @@ _pkginfo.txt
 ClientBin/
 ~$*
 *~
+
+# User-supplied commercial Fallout data must never enter this repository.
+master.dat
+MASTER.DAT
+critter.dat
+CRITTER.DAT
+falloutw.exe
+FALLOUTW.EXE
+fallout.exe
+FALLOUT.EXE
 *.dbmdl
 *.dbproj.schemaview
 *.jfm

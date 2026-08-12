@@ -156,7 +156,7 @@ void logUnavailableRuntimeCheckpoints(Logger& log)
     };
     for (const char* checkpoint : checkpoints) {
         char key[112];
-        std::snprintf(key, sizeof(key), "%s.STATUS", checkpoint);
+        std::snprintf(key, sizeof(key), "%s.RUNTIME_STATUS", checkpoint);
         log.line("MEMORY", key, "NOT_RUN_NO_FALLOUT_RUNTIME");
     }
     log.line("MEMORY", "AUDIO_OFF_PEAK_BYTES", "UNKNOWN_NO_FALLOUT_RUNTIME");

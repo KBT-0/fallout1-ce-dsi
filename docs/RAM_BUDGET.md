@@ -4,7 +4,11 @@
 
 No representative gameplay run has been measured yet. Every numeric gameplay
 field is therefore `unknown`; the 16 MiB hardware capacity is a platform fact,
-not a measured free-heap result.
+not a measured free-heap result. The unified benchmark now adds a user-supplied
+real-data lower bound: it parses both DAT catalogs and simultaneously loads a
+representative map, script list/bytecode, critter/item prototypes, message,
+palette, interface art and critter art.
+This is explicitly not counted as a gameplay working set.
 
 The first instrumentation hook is implemented in
 `src/plib/gnw/memory.{h,cc}`. `mem_get_stats` reports current/peak block counts
@@ -30,6 +34,7 @@ and current/peak bytes, including GNW guard and alignment overhead.
 | Audio ON | unknown | unknown | gameplay peak window + direct audio allocations |
 | Stacks and allocator overhead outside GNW | unknown | unknown | linker symbols + platform heap probe |
 | Platform/backend allocations | unknown | unknown | DSi backend counters |
+| Real DAT catalogs and representative asset payload | unknown | implemented, hardware pending | `dsi-bench.nds` ORIGINAL/TURKISH checkpoints |
 | Required free headroom | 1,048,576 | required | PROJECT_v3 §8 |
 | Peak total | unknown | unknown | maximum simultaneous resident set |
 
@@ -64,11 +69,11 @@ the active category. Required checkpoints are:
 
 1. process entry, before engine initialization;
 2. after platform/filesystem initialization;
-3. after engine initialization;
+3. after engine initialization (still unknown; archive-catalog checkpoint is separate);
 4. after the 640x480 indexed framebuffer and render staging are allocated;
 5. immediately before representative map load;
-6. after map, objects, scripts and messages are resident;
-7. after art preloading settles;
+6. after map, objects, scripts and messages are resident (asset-payload lower bound implemented; parsed runtime state still unknown);
+7. after art preloading settles (representative raw art payload implemented; production art cache still unknown);
 8. after 60 seconds of representative exploration with audio off;
 9. after combat and inventory/dialog transitions with audio off;
 10. repeat the same state with audio on;

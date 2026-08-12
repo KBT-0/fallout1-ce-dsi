@@ -1,4 +1,5 @@
 #include "bench.h"
+#include "asset_probe.h"
 #include "input_selftest.h"
 #include "memory_probe.h"
 #include "rectmap.h"
@@ -126,7 +127,7 @@ int main()
     }
 
     log.line("RUN", "BEGIN", selection.launcher);
-    log.line("RUN", "FORMAT", "FALLOUT1_DSI_BENCH_V1");
+    log.line("RUN", "FORMAT", "FALLOUT1_DSI_BENCH_V2");
     log.line("RUN", "ENV", selection.environment);
     log.line("RUN", "LAUNCHER", selection.launcher);
     log.line("RUN", "DSI_MODE", dsiMode ? 1u : 0u);
@@ -146,7 +147,11 @@ int main()
     logMemorySnapshot(log, "01_PROCESS_ENTRY", "PROCESS_ENTRY", processEntry);
     logMemoryCheckpoint(log, "02_AFTER_PLATFORM_FILESYSTEM_INITIALIZATION",
         "PLATFORM_FILESYSTEM");
+
+    bool turkishGlyphFaultsObserved = false;
+    const bool assetOk = runAssetProbe(log, &turkishGlyphFaultsObserved);
     logUnavailableRuntimeCheckpoints(log);
+    restoreConsole();
 
     uint32_t rectPassed = 0;
     uint32_t rectFailed = 0;
@@ -181,8 +186,9 @@ int main()
     freeRenderResources(&resources);
     logMemoryCheckpoint(log, "13_AFTER_BENCHMARK_TEARDOWN", "BENCH_TEARDOWN");
 
-    const bool success = dsiMode && rectOk && sdOk && allocationOk && renderOk
-        && inputOk && !whiteTextureFaultsObserved;
+    const bool success = dsiMode && assetOk && rectOk && sdOk && allocationOk
+        && renderOk && inputOk && !whiteTextureFaultsObserved
+        && !turkishGlyphFaultsObserved;
     log.line("RUN", "STATUS", success ? "PASS" : "FAIL");
     log.line("RUN", "END", selection.launcher);
     log.flush();
