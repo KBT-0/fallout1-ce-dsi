@@ -391,6 +391,10 @@ static bool setup3d(RenderResources& resources, int textureCount,
     } else {
         vramSetPrimaryBanks(VRAM_A_TEXTURE_SLOT0, VRAM_B_TEXTURE_SLOT1,
             VRAM_C_SUB_BG_0x06200000, VRAM_D_TEXTURE_SLOT3);
+        // The texture allocator spans A-D independently of the current bank
+        // mapping. Reserve C explicitly so the six 64 KiB chunks land in
+        // A, B and D while C remains available to the sub 2D engine.
+        glLockVRAMBank(VRAM_C);
     }
     vramSetBankE(VRAM_E_TEX_PALETTE);
 

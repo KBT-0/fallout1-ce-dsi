@@ -17,5 +17,6 @@ if [[ "$unit_code" != "2" && "$unit_code" != "3" ]]; then
 fi
 
 echo "DSI_BENCH_UNIT_CODE=$unit_code"
-arm-none-eabi-size build/dsi-bench.elf
+arm_size="${DEVKITARM:-${DEVKITPRO:-/opt/devkitpro}/devkitARM}/bin/arm-none-eabi-size"
+"$arm_size" build/dsi-bench.elf
 sha256sum build/dsi-bench.nds
