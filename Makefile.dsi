@@ -119,7 +119,7 @@ INCLUDE_FLAGS := \
 	-I$(LIBNDS)/include
 
 ifneq ($(strip $(PORTLIBS)),)
-INCLUDE_FLAGS += -I$(PORTLIBS)/include
+INCLUDE_FLAGS += $(foreach d,$(PORTLIBS),-I$(d)/include)
 endif
 
 CPPFLAGS := \
@@ -141,7 +141,7 @@ LDFLAGS := \
 	-Wl,-Map,$(abspath $(MAP))
 
 LIBPATHS := -L$(LIBNDS)/lib
-LIBPATHS += -L$(PORTLIBS)/lib
+LIBPATHS += $(foreach d,$(PORTLIBS),-L$(d)/lib)
 
 # Fallout CE's maintained 3DS build links zlib. nds-zlib is supplied through
 # devkitPro portlibs; CI attempts to install it when absent.
