@@ -1,7 +1,7 @@
 # Run 1 report — PROJECT_v3 §34
 
 Measured:
-- GitHub Actions run `31626178248` compiled and linked the 111-unit ARM9 feasibility closure with devkitARM r68, GCC 16.1.0, libnds 2.0.2, and Calico 1.2.0.
+- GitHub Actions run `31626859493` compiled and linked the 111-unit ARM9 feasibility closure with devkitARM r68, GCC 16.1.0, libnds 2.0.2, and Calico 1.2.0.
 - Baseline ELF: text 902,600; data 247,036; bss 1,519,792; total 2,669,428 bytes.
 - Optimized ELF: text 895,024; data 246,916; bss 1,518,904; total 2,660,844 bytes.
 - Section GC saved 8,584 bytes against the baseline.

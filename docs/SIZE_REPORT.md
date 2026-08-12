@@ -6,9 +6,10 @@
 LOWER BOUND — successful ARM9 compile and link
 ```
 
-The result is from GitHub Actions run `31626178248`, commit
-`e6e14c222040a65d7256a42cda8af07119417569`. The successful artifact contains
-both ELF files and both linker maps. The generated evidence has also been
+The final verified result is from GitHub Actions run `31626859493`, commit
+`cab6320979593cdefe9fa41ab5db388b417068e6`, artifact `9153492831`. The
+successful artifact contains both ELF files, both linker maps, and populated
+`arm-none-eabi-size`/`-A` output. The generated ELF/map evidence has also been
 unpacked under the local ignored `build/` directory.
 
 ## Reproducible environment
