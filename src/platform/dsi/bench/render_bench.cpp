@@ -34,6 +34,7 @@ static int gTextureIds[kTextureCount];
 static void* gTexturePointers[kTextureCount];
 static int gMainBg = -1;
 static int gSubBg = -1;
+static bool gTextureBankCLocked;
 
 static void initializePalette(u16* palette)
 {
@@ -150,25 +151,30 @@ static void updateDirtyAt(uint8_t* destination, int stride, int originX,
     }
 }
 
+static void packTextureChunk(RenderResources& resources, int sourceChunk,
+    uint8_t* destination)
+{
+    const int chunkX = sourceChunk % 3;
+    const int chunkY = sourceChunk / 3;
+    std::memset(destination, 0, kTextureBytes);
+    const int copyWidth = std::min(256, kSourceWidth - chunkX * 256);
+    const int copyHeight = std::min(256, kSourceHeight - chunkY * 256);
+    if (copyWidth <= 0 || copyHeight <= 0) {
+        return;
+    }
+    for (int y = 0; y < copyHeight; ++y) {
+        std::memcpy(destination + y * 256,
+            resources.source + (chunkY * 256 + y) * kSourceWidth
+                + chunkX * 256,
+            static_cast<size_t>(copyWidth));
+    }
+}
+
 static void packTextureChunks(RenderResources& resources)
 {
-    std::memset(resources.textureStage, 0, kTextureStageBytes);
-    for (int chunkY = 0; chunkY < 2; ++chunkY) {
-        for (int chunkX = 0; chunkX < 3; ++chunkX) {
-            uint8_t* chunk = resources.textureStage
-                + (chunkY * 3 + chunkX) * kTextureBytes;
-            const int copyWidth = std::min(256, kSourceWidth - chunkX * 256);
-            const int copyHeight = std::min(256, kSourceHeight - chunkY * 256);
-            if (copyWidth <= 0 || copyHeight <= 0) {
-                continue;
-            }
-            for (int y = 0; y < copyHeight; ++y) {
-                std::memcpy(chunk + y * 256,
-                    resources.source + (chunkY * 256 + y) * kSourceWidth
-                        + chunkX * 256,
-                    static_cast<size_t>(copyWidth));
-            }
-        }
+    for (int index = 0; index < kTextureCount; ++index) {
+        packTextureChunk(resources, index,
+            resources.textureStage + index * kTextureBytes);
     }
 }
 
@@ -193,6 +199,7 @@ static void storeFrame(int index, const FrameSplit& split)
 }
 
 static void logCase(Logger& log, const char* name, uint32_t textureVramBytes,
+    uint32_t bitmapVramBytes, uint32_t captureVramBytes,
     uint32_t paletteVramBytes, uint32_t stagingBytes, uint32_t uploadBytes,
     uint32_t effectiveDivisor = 1)
 {
@@ -206,6 +213,8 @@ static void logCase(Logger& log, const char* name, uint32_t textureVramBytes,
     log.line("RENDER", key, name);
     LOG_CASE_VALUE("SOURCE_BYTES", kSourceBytes);
     LOG_CASE_VALUE("TEXTURE_VRAM_BYTES", textureVramBytes);
+    LOG_CASE_VALUE("BITMAP_VRAM_BYTES", bitmapVramBytes);
+    LOG_CASE_VALUE("CAPTURE_VRAM_BYTES", captureVramBytes);
     LOG_CASE_VALUE("PALETTE_VRAM_BYTES", paletteVramBytes);
     LOG_CASE_VALUE("MAIN_RAM_STAGING_BYTES", stagingBytes);
     LOG_CASE_VALUE("UPLOAD_BYTES_PER_FRAME", uploadBytes);
@@ -271,10 +280,10 @@ static FrameSplit runCpuFullFrame(RenderResources& resources, int frame)
     scaleFullSource(resources.source, resources.mainStage, 0);
     scaleFullSource(resources.source, resources.subStage, kSourceHeight / 4);
     const uint32_t afterStaging = cpuGetTiming();
-    DC_FlushRange(resources.mainStage, kBitmapBytes);
-    DC_FlushRange(resources.subStage, kBitmapBytes);
-    dmaCopyWords(0, resources.mainStage, bgGetGfxPtr(gMainBg), kBitmapBytes);
-    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kBitmapBytes);
+    DC_FlushRange(resources.mainStage, kVisibleBytes);
+    DC_FlushRange(resources.subStage, kVisibleBytes);
+    dmaCopyWords(0, resources.mainStage, bgGetGfxPtr(gMainBg), kVisibleBytes);
+    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kVisibleBytes);
     const uint32_t afterUpload = cpuGetTiming();
     bgUpdate();
     const uint32_t afterSubmit = cpuGetTiming();
@@ -292,10 +301,10 @@ static FrameSplit run2dFullFrame(RenderResources& resources, int frame)
     cpuStartTiming(0);
     prepareVisibleBuffers(resources, frame);
     const uint32_t afterStaging = cpuGetTiming();
-    DC_FlushRange(resources.mainStage, kBitmapBytes);
-    DC_FlushRange(resources.subStage, kBitmapBytes);
-    dmaCopyWords(0, resources.mainStage, bgGetGfxPtr(gMainBg), kBitmapBytes);
-    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kBitmapBytes);
+    DC_FlushRange(resources.mainStage, kVisibleBytes);
+    DC_FlushRange(resources.subStage, kVisibleBytes);
+    dmaCopyWords(0, resources.mainStage, bgGetGfxPtr(gMainBg), kVisibleBytes);
+    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kVisibleBytes);
     const uint32_t afterUpload = cpuGetTiming();
     bgUpdate();
     const uint32_t afterSubmit = cpuGetTiming();
@@ -394,7 +403,12 @@ static bool setup3d(RenderResources& resources, int textureCount,
         // The texture allocator spans A-D independently of the current bank
         // mapping. Reserve C explicitly so the six 64 KiB chunks land in
         // A, B and D while C remains available to the sub 2D engine.
-        glLockVRAMBank(VRAM_C);
+        if (!gTextureBankCLocked) {
+            if (!glLockVRAMBank(VRAM_C)) {
+                return false;
+            }
+            gTextureBankCLocked = true;
+        }
     }
     vramSetBankE(VRAM_E_TEX_PALETTE);
 
@@ -535,13 +549,48 @@ static FrameSplit runHybridFrame(RenderResources& resources, int frame)
         DC_FlushRange(source, dirtySize);
         dmaCopyWords(0, source, target, dirtySize);
     }
-    DC_FlushRange(resources.subStage, kBitmapBytes);
-    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kBitmapBytes);
+    DC_FlushRange(resources.subStage, kVisibleBytes);
+    dmaCopyWords(0, resources.subStage, bgGetGfxPtr(gSubBg), kVisibleBytes);
     const uint32_t afterUpload = cpuGetTiming();
     vramSetBankA(VRAM_A_TEXTURE_SLOT0);
     const uint32_t afterRemapBack = cpuGetTiming();
     drawTextureGrid(kTextureCount);
     bgUpdate();
+    glFlush(0);
+    const uint32_t afterSubmit = cpuGetTiming();
+    result.staging = afterStaging;
+    result.remap = afterRemap - afterStaging;
+    result.upload = afterUpload - afterRemap;
+    result.remapBack = afterRemapBack - afterUpload;
+    result.submit = afterSubmit - afterRemapBack;
+    result.total = afterSubmit;
+    return result;
+}
+
+static FrameSplit run3dDemandFrame(RenderResources& resources, int frame)
+{
+    static const int sourceChunks[] = { 0, 1, 3, 4 };
+    FrameSplit result = {};
+    swiWaitForVBlank();
+    cpuStartTiming(0);
+    mutateSource(resources, frame);
+    for (int index = 0; index < 4; ++index) {
+        packTextureChunk(resources, sourceChunks[index],
+            resources.textureStage + index * kTextureBytes);
+    }
+    const uint32_t afterStaging = cpuGetTiming();
+    const u32 saved = vramSetPrimaryBanks(VRAM_A_LCD, VRAM_B_LCD,
+        VRAM_C_SUB_BG_0x06200000, VRAM_D_TEXTURE_SLOT3);
+    const uint32_t afterRemap = cpuGetTiming();
+    DC_FlushRange(resources.textureStage, 4 * kTextureBytes);
+    for (int index = 0; index < 4; ++index) {
+        dmaCopyWords(0, resources.textureStage + index * kTextureBytes,
+            gTexturePointers[index], kTextureBytes);
+    }
+    const uint32_t afterUpload = cpuGetTiming();
+    vramRestorePrimaryBanks(saved);
+    const uint32_t afterRemapBack = cpuGetTiming();
+    drawTextureGrid(4);
     glFlush(0);
     const uint32_t afterSubmit = cpuGetTiming();
     result.staging = afterStaging;
@@ -629,11 +678,11 @@ bool runRenderBenchmark(Logger& log, RenderResources& resources)
     }
 
     runFrames([&](int frame) { return runCpuFullFrame(resources, frame); });
-    logCase(log, "CPU_FULL", 2 * kBitmapBytes, 2 * 512,
-        2 * kBitmapBytes, 2 * kBitmapBytes);
+    logCase(log, "CPU_FULL", 0, 2 * kBitmapBytes, 0, 2 * 512,
+        2 * kBitmapBytes, 2 * kVisibleBytes);
     runFrames([&](int frame) { return run2dFullFrame(resources, frame); });
-    logCase(log, "2D_FULL", 2 * kBitmapBytes, 2 * 512,
-        2 * kBitmapBytes, 2 * kBitmapBytes);
+    logCase(log, "2D_FULL", 0, 2 * kBitmapBytes, 0, 2 * 512,
+        2 * kBitmapBytes, 2 * kVisibleBytes);
 
     struct DirtyCase {
         const char* name;
@@ -649,7 +698,7 @@ bool runRenderBenchmark(Logger& log, RenderResources& resources)
         runFrames([&](int frame) {
             return run2dDirtyFrame(resources, frame, dirty.width, dirty.height);
         });
-        logCase(log, dirty.name, 2 * kBitmapBytes, 2 * 512,
+        logCase(log, dirty.name, 0, 2 * kBitmapBytes, 0, 2 * 512,
             2 * kBitmapBytes, 2 * dirty.width * dirty.height);
     }
 
@@ -663,14 +712,26 @@ bool runRenderBenchmark(Logger& log, RenderResources& resources)
     bgUpdate();
 
     runFrames([&](int frame) { return run3dFullFrame(resources, frame); });
-    logCase(log, "3D_FULL", kTextureStageBytes, 512,
+    logCase(log, "3D_FULL", kTextureStageBytes, 0, 0, 512,
         kTextureStageBytes, kTextureStageBytes);
     runFrames([&](int frame) { return run3dDirtyFrame(resources, frame); });
-    logCase(log, "3D_DIRTY", kTextureStageBytes, 512,
+    logCase(log, "3D_DIRTY", kTextureStageBytes, 0, 0, 512,
         kTextureStageBytes, 64 * 64);
     runFrames([&](int frame) { return runHybridFrame(resources, frame); });
-    logCase(log, "HYBRID_MAIN3D_SUB2D", kTextureStageBytes + kBitmapBytes,
-        2 * 512, kTextureStageBytes + kBitmapBytes, 64 * 64 + kBitmapBytes);
+    logCase(log, "HYBRID_MAIN3D_SUB2D", kTextureStageBytes, kBitmapBytes,
+        0, 2 * 512, kTextureStageBytes + kBitmapBytes,
+        64 * 64 + kVisibleBytes);
+
+    log.status("Demand-loaded rectmap case...");
+    if (!setup3d(resources, 4, false)) {
+        log.line("RENDER", "STATUS", "FAIL_DEMAND_3D_INIT");
+        return false;
+    }
+    runFrames([&](int frame) { return run3dDemandFrame(resources, frame); });
+    logCase(log, "3D_DEMAND_RECTMAP", 4 * kTextureBytes, 0, 0, 512,
+        4 * kTextureBytes, 4 * kTextureBytes);
+    log.line("RENDER", "3D_DEMAND_RECTMAP.RESIDENT_SOURCE_CHUNKS", 4);
+    log.line("RENDER", "3D_DEMAND_RECTMAP.SOURCE_CHUNK_IDS", "0,1,3,4");
 
     log.status("Dual-3D penalty case...");
     if (!setup3d(resources, 4, true)) {
@@ -680,8 +741,8 @@ bool runRenderBenchmark(Logger& log, RenderResources& resources)
     initializeCaptureSprites();
     gSubBg = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     runFrames([&](int frame) { return runDual3dFrame(resources, frame); });
-    logCase(log, "DUAL3D_CAPTURE_ALTERNATING", 4 * kTextureBytes + 2 * 128 * 1024,
-        512, 4 * kTextureBytes, 64 * 64, 2);
+    logCase(log, "DUAL3D_CAPTURE_ALTERNATING", 4 * kTextureBytes, 0,
+        2 * 128 * 1024, 512, kTextureStageBytes, 64 * 64, 2);
 
     log.line("RENDER", "INDEXED_SOURCE_FORMAT", "8BPP_256_COLOR");
     log.line("RENDER", "RGB_EXPANSION", "CAPTURE_OUTPUT_ONLY");

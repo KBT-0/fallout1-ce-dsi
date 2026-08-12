@@ -95,7 +95,7 @@ int main()
     consoleDemoInit();
     const RunSelection selection = selectRun();
     const bool dsiMode = isDSiMode();
-    const bool highClock = dsiMode && setCpuClock(true);
+    const bool oldHighClock = dsiMode && setCpuClock(true);
 
     consoleClear();
     iprintf("Initializing SD...\n");
@@ -130,7 +130,8 @@ int main()
     log.line("RUN", "ENV", selection.environment);
     log.line("RUN", "LAUNCHER", selection.launcher);
     log.line("RUN", "DSI_MODE", dsiMode ? 1u : 0u);
-    log.line("RUN", "CPU_134MHZ_REQUEST_OK", highClock ? 1u : 0u);
+    log.line("RUN", "CPU_134MHZ_REQUESTED", dsiMode ? 1u : 0u);
+    log.line("RUN", "CPU_WAS_134MHZ_BEFORE_REQUEST", oldHighClock ? 1u : 0u);
     log.line("RUN", "AUTHORITATIVE",
         std::strcmp(selection.environment, "REAL_DSI") == 0 && dsiMode
             ? "REAL_DSI_USER_ATTESTED"
