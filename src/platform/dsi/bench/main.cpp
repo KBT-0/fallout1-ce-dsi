@@ -127,7 +127,7 @@ int main()
     }
 
     log.line("RUN", "BEGIN", selection.launcher);
-    log.line("RUN", "FORMAT", "FALLOUT1_DSI_BENCH_V2");
+    log.line("RUN", "FORMAT", "FALLOUT1_DSI_BENCH_V3");
     log.line("RUN", "ENV", selection.environment);
     log.line("RUN", "LAUNCHER", selection.launcher);
     log.line("RUN", "DSI_MODE", dsiMode ? 1u : 0u);
@@ -161,9 +161,6 @@ int main()
     log.line("RECTMAP", "STATUS", rectOk ? "PASS" : "FAIL");
     log.flush();
 
-    const bool sdOk = runSdBenchmark(log);
-    logMemoryCheckpoint(log, "02B_AFTER_SD_BENCHMARK", "SD_IO");
-
     RenderResources resources = {};
     const bool allocationOk = allocateRenderResources(&resources);
     logMemoryCheckpoint(log,
@@ -184,6 +181,11 @@ int main()
     glResetTextures();
     glUnlockVRAMBank(VRAM_C);
     freeRenderResources(&resources);
+    logMemoryCheckpoint(log, "04C_AFTER_RENDER_INPUT_TEARDOWN",
+        "RENDER_INPUT_TEARDOWN");
+
+    const bool sdOk = runSdBenchmark(log);
+    logMemoryCheckpoint(log, "04D_AFTER_SD_BENCHMARK", "SD_IO");
     logMemoryCheckpoint(log, "13_AFTER_BENCHMARK_TEARDOWN", "BENCH_TEARDOWN");
 
     const bool success = dsiMode && assetOk && rectOk && sdOk && allocationOk
@@ -197,13 +199,7 @@ int main()
     consoleClear();
     iprintf("Benchmark complete: %s\n\n", success ? "PASS" : "FAIL");
     iprintf("Log: sd:/fallout1/bench.log\n\n");
-    if (std::strcmp(selection.launcher, "DIRECT_UNLAUNCH") == 0) {
-        iprintf("Now power off and run the same\n");
-        iprintf(".nds from TWiLight Menu++.\n");
-        iprintf("Choose A then R to append.\n");
-    } else {
-        iprintf("Return the single bench.log.\n");
-    }
+    iprintf("Return the single bench.log.\n");
     while (pmMainLoop()) {
         swiWaitForVBlank();
     }

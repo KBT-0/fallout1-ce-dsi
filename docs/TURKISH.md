@@ -7,15 +7,21 @@ unified `dsi-bench.nds` reads only files that the owner places on the SD card.
 ORIGINAL and TURKISH are different roots and different log namespaces so a
 localization failure cannot be reported as a base DSi-port failure.
 
-The execution order is enforced by the benchmark:
+Both datasets can be present before the DSi is powered on. The execution order
+is enforced by the benchmark in one hardware session:
 
 1. open and validate ORIGINAL `master.dat`, `critter.dat`, `data/`, and the
    optional `fallout.cfg`;
 2. load representative ORIGINAL map, scripts, messages, palette and art;
-3. if the TURKISH root exists, build the complete file-difference manifest;
-4. inspect original and patched PE executable hashes and `.text` sections when
-   both executables were supplied;
-5. only then load TURKISH data and run its glyph test.
+3. open TURKISH and load its corresponding representative asset/RAM payload;
+4. build the complete ORIGINAL-vs-TURKISH file-difference manifest and inspect
+   executable hashes and PE `.text` sections when both were supplied;
+5. run the TURKISH structural and visual glyph tests;
+6. continue with rectmap, render, input, SD, and memory checkpoints.
+
+All six stages occur in one invocation and write one
+`sd:/fallout1/bench.log`. No SD-card removal or dataset swap is part of the
+procedure.
 
 `fallout.cfg` is optional. When present, `[system] master_dat`, `critter_dat`,
 `master_patches`, and `language` are honored when they are safe paths inside
@@ -23,7 +29,7 @@ that dataset root. Otherwise the clean-install defaults are used.
 
 ## SD-card layout
 
-For the base test, use only:
+Prepare the complete card once, before the hardware session:
 
 ```text
 sd:/
@@ -35,17 +41,12 @@ sd:/
       data/
       fallout.cfg        optional
       falloutw.exe       optional, audit metadata only
-```
-
-After ORIGINAL has passed on its own, retain it unchanged and add:
-
-```text
-sd:/fallout1/turkish/
-  master.dat
-  critter.dat
-  data/
-  fallout.cfg            optional
-  falloutw.exe           optional, audit metadata only
+    turkish/
+      master.dat
+      critter.dat
+      data/
+      fallout.cfg        optional
+      falloutw.exe       optional, audit metadata only
 ```
 
 The optional executables are never executed. They are read only to determine
@@ -58,7 +59,8 @@ is the input to that follow-up audit.
 
 ## Difference evidence
 
-Before any TURKISH semantic load, `bench.log` records:
+After both asset/RAM probes and before Turkish glyph validation, `bench.log`
+records:
 
 - logical files added, removed, or modified inside both DAT archives;
 - recursively added, removed, or modified loose files, including `data/`,

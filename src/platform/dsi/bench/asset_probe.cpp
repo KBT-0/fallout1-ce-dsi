@@ -553,8 +553,7 @@ bool validateTurkishGlyphs(const Dataset& dataset, Logger& log,
     return !fault;
 }
 
-bool runRepresentativeLoads(const Dataset& dataset, Logger& log, bool turkish,
-    bool* glyphFaults)
+bool runRepresentativeLoads(const Dataset& dataset, Logger& log, bool turkish)
 {
     std::vector<std::vector<uint8_t>> resident;
     resident.reserve(12);
@@ -600,7 +599,6 @@ bool runRepresentativeLoads(const Dataset& dataset, Logger& log, bool turkish,
     std::snprintf(key, sizeof(key), "%s.RESIDENT_PAYLOAD_BYTES", dataset.kind);
     log.line64("ASSET", key, total);
     logDatasetKey(log, dataset.kind, "LOAD_STATUS", ok ? "PASS" : "FAIL");
-    if (turkish) ok = validateTurkishGlyphs(dataset, log, glyphFaults) && ok;
     resident.clear();
     resident.shrink_to_fit();
     logMemoryCheckpoint(log, turkish ? "12T_AFTER_TURKISH_ASSET_UNLOAD"
@@ -837,10 +835,11 @@ void compareExecutables(Logger& log, const Dataset& original, const Dataset& tur
             : "NO_CODE_CHANGE_DETECTED_CHECK_DATA_AND_RESOURCES");
 }
 
-bool compareBeforeTurkishLoad(Logger& log, const Dataset& original,
+bool compareDatasets(Logger& log, const Dataset& original,
     const Dataset& turkish)
 {
-    log.line("DATASET_DIFF", "ORDER_GUARD", "BEGIN_BEFORE_TURKISH_LOAD");
+    log.line("DATASET_DIFF", "ORDER_GUARD",
+        "BEGIN_AFTER_ORIGINAL_AND_TURKISH_ASSET_LOADS_BEFORE_GLYPH");
     const uint32_t master = compareArchive(log, "MASTER_DAT", original.master,
         original.masterHash, original.masterBytes, turkish.master,
         turkish.masterHash, turkish.masterBytes);
@@ -850,7 +849,8 @@ bool compareBeforeTurkishLoad(Logger& log, const Dataset& original,
     const uint32_t loose = compareLoose(log, original, turkish);
     compareExecutables(log, original, turkish);
     log.line("DATASET_DIFF", "TOTAL_DIFFERENT_FILES", master + critter + loose);
-    log.line("DATASET_DIFF", "ORDER_GUARD", "COMPLETE_BEFORE_TURKISH_LOAD");
+    log.line("DATASET_DIFF", "ORDER_GUARD",
+        "COMPLETE_AFTER_ORIGINAL_AND_TURKISH_ASSET_LOADS_BEFORE_GLYPH");
     log.line("DATASET_DIFF", "STATUS", "PASS_MANIFEST_RECORDED");
     log.flush();
     return true;
@@ -865,7 +865,10 @@ bool runAssetProbe(Logger& log, bool* turkishGlyphFaultsObserved)
     iprintf("Phase 0C real assets\nORIGINAL first...\n");
     log.line("ASSET", "POLICY", "USER_SUPPLIED_ONLY_NO_BUNDLED_GAME_ASSETS");
     log.line("ASSET", "ORIGINAL_TEST_ORDER", "FIRST");
-    log.line("ASSET", "TURKISH_TEST_ORDER", "AFTER_ORIGINAL_AND_DIFF_MANIFEST");
+    log.line("ASSET", "TURKISH_TEST_ORDER", "SECOND_BEFORE_DATASET_DIFF");
+    log.line("ASSET", "DATASET_DIFF_ORDER", "THIRD_AFTER_BOTH_ASSET_LOADS");
+    log.line("ASSET", "TURKISH_GLYPH_ORDER", "FOURTH_AFTER_DATASET_DIFF");
+    log.line("ASSET", "SESSION_LAYOUT", "BOTH_DATASETS_MAY_BE_PRESENT_AT_START");
 
     Dataset original("ORIGINAL", kOriginalRoot);
     if (!openDataset(&original, log)) {
@@ -882,7 +885,7 @@ bool runAssetProbe(Logger& log, bool* turkishGlyphFaultsObserved)
     }
     logMemoryCheckpoint(log, "03A_AFTER_ORIGINAL_ARCHIVE_CATALOGS",
         "REAL_FALLOUT_ARCHIVE_CATALOGS");
-    bool success = runRepresentativeLoads(original, log, false, nullptr);
+    bool success = runRepresentativeLoads(original, log, false);
     logDatasetKey(log, "ORIGINAL", "STATUS", success ? "PASS" : "FAIL");
     if (!success) {
         log.line("ASSET", "TURKISH.STATUS", "NOT_RUN_ORIGINAL_FAILED");
@@ -891,7 +894,7 @@ bool runAssetProbe(Logger& log, bool* turkishGlyphFaultsObserved)
     }
 
     if (!pathType(kTurkishRoot, true)) {
-        log.line("ASSET", "TURKISH.STATUS", "NOT_PRESENT_OPTIONAL_SEPARATE_TEST_NOT_RUN");
+        log.line("ASSET", "TURKISH.STATUS", "NOT_PRESENT_OPTIONAL_TEST_NOT_RUN");
         log.line("ASSET", "STATUS", "PASS_ORIGINAL_ONLY");
         log.flush();
         return true;
@@ -905,10 +908,15 @@ bool runAssetProbe(Logger& log, bool* turkishGlyphFaultsObserved)
         return false;
     }
     logMemoryCheckpoint(log, "03T_AFTER_TURKISH_ARCHIVE_CATALOGS",
-        "TURKISH_ARCHIVE_CATALOGS_BEFORE_LOAD");
-    compareBeforeTurkishLoad(log, original, turkish);
-    const bool turkishOk = runRepresentativeLoads(turkish, log, true,
+        "TURKISH_ARCHIVE_CATALOGS_BEFORE_ASSET_LOAD");
+    const bool turkishAssetOk = runRepresentativeLoads(turkish, log, true);
+    logDatasetKey(log, "TURKISH", "ASSET_RAM_STATUS",
+        turkishAssetOk ? "PASS" : "FAIL");
+
+    const bool diffOk = compareDatasets(log, original, turkish);
+    const bool glyphOk = validateTurkishGlyphs(turkish, log,
         turkishGlyphFaultsObserved);
+    const bool turkishOk = turkishAssetOk && diffOk && glyphOk;
     logDatasetKey(log, "TURKISH", "STATUS", turkishOk ? "PASS" : "FAIL");
     log.line("ASSET", "STATUS", turkishOk ? "PASS_ORIGINAL_AND_TURKISH"
                                            : "FAIL_TURKISH_ONLY");
