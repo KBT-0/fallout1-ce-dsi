@@ -140,8 +140,10 @@ LDFLAGS := \
 	-Wl,--cref \
 	-Wl,-Map,$(abspath $(MAP))
 
-LIBPATHS := -L$(LIBNDS)/lib
-LIBPATHS += $(foreach d,$(PORTLIBS),-L$(d)/lib)
+# Do not use devkitPro's generic LIBPATHS name here: ds_rules owns it and may
+# rewrite it from LIBDIRS. Keep this feasibility link's paths isolated.
+FEAS_LIBPATHS := -L$(LIBNDS)/lib
+FEAS_LIBPATHS += $(foreach d,$(PORTLIBS),-L$(d)/lib)
 
 # Fallout CE's maintained 3DS build links zlib. nds-zlib is supplied through
 # devkitPro portlibs; CI attempts to install it when absent.
@@ -182,7 +184,7 @@ print-feasibility-config:
 $(ELF): $(OBJECTS)
 	@mkdir -p $(dir $@)
 	@echo "LINK $@"
-	$(CXX) $(LDFLAGS) $(OBJECTS) $(LIBPATHS) $(LIBS) -o $@
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(FEAS_LIBPATHS) $(LIBS) -o $@
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
