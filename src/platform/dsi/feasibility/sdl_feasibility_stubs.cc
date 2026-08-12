@@ -23,6 +23,9 @@ static Uint32 gMouseButtons = 0;
 static bool gTouchHeld = false;
 static int gLastTouchPx = -1;
 static int gLastTouchPy = -1;
+static bool gClockStarted = false;
+static Uint32 gLastClockTicks = 0;
+static Uint64 gAccumulatedClockTicks = 0;
 static SDL_Event gEvents[24];
 static unsigned int gEventRead = 0;
 static unsigned int gEventWrite = 0;
@@ -327,7 +330,16 @@ SDL_Keymod SDL_GetModState(void) { return KMOD_NONE; }
 
 Uint32 SDL_GetTicks(void)
 {
-    return static_cast<Uint32>(osGetTime());
+    if (!gClockStarted) {
+        cpuStartTiming(0);
+        gClockStarted = true;
+        gLastClockTicks = cpuGetTiming();
+        return 0;
+    }
+    const Uint32 ticks = cpuGetTiming();
+    gAccumulatedClockTicks += static_cast<Uint32>(ticks - gLastClockTicks);
+    gLastClockTicks = ticks;
+    return static_cast<Uint32>((gAccumulatedClockTicks * 1000u) / BUS_CLOCK);
 }
 
 void SDL_Delay(Uint32 ms)
