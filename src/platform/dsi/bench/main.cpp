@@ -174,11 +174,15 @@ int main()
     logMemoryCheckpoint(log, "04B_AFTER_RENDER_BENCHMARK", "RENDER_COMPLETE");
 
     restoreConsole();
-    const bool inputOk = runInputSelfTest(log);
+    bool whiteTextureFaultsObserved = false;
+    const bool inputOk = runInputSelfTest(log, &whiteTextureFaultsObserved);
+    glResetTextures();
+    glUnlockVRAMBank(VRAM_C);
     freeRenderResources(&resources);
     logMemoryCheckpoint(log, "13_AFTER_BENCHMARK_TEARDOWN", "BENCH_TEARDOWN");
 
-    const bool success = dsiMode && rectOk && sdOk && allocationOk && renderOk && inputOk;
+    const bool success = dsiMode && rectOk && sdOk && allocationOk && renderOk
+        && inputOk && !whiteTextureFaultsObserved;
     log.line("RUN", "STATUS", success ? "PASS" : "FAIL");
     log.line("RUN", "END", selection.launcher);
     log.flush();

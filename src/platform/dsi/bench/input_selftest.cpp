@@ -27,7 +27,21 @@ static bool waitForKey(uint32_t key)
     return false;
 }
 
-bool runInputSelfTest(Logger& log)
+static uint32_t waitForKeys(uint32_t mask)
+{
+    waitForRelease();
+    while (pmMainLoop()) {
+        swiWaitForVBlank();
+        scanKeys();
+        const uint32_t pressed = keysDown() & mask;
+        if (pressed != 0) {
+            return pressed;
+        }
+    }
+    return 0;
+}
+
+bool runInputSelfTest(Logger& log, bool* whiteTextureFaultsObserved)
 {
     consoleClear();
     iprintf("Input self-test\n\n");
@@ -90,6 +104,20 @@ bool runInputSelfTest(Logger& log)
         success = pressed && success;
     }
     iprintf("\n");
+
+    iprintf("Render visual check:\n");
+    iprintf("A = no white flashes\n");
+    iprintf("X = white flashes seen\n");
+    const uint32_t visualKey = waitForKeys(KEY_A | KEY_X);
+    const bool whiteFaults = (visualKey & KEY_X) != 0;
+    if (whiteTextureFaultsObserved != nullptr) {
+        *whiteTextureFaultsObserved = whiteFaults;
+    }
+    log.line("INPUT", "WHITE_TEXTURE_FAULTS_OBSERVED",
+        whiteFaults ? "YES" : "NO");
+    log.line("INPUT", "WHITE_TEXTURE_VISUAL_STATUS",
+        whiteFaults ? "FAIL" : "PASS");
+
     log.line("INPUT", "STATUS", success ? "PASS" : "FAIL");
     log.flush();
     return success;

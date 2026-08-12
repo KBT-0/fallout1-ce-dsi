@@ -247,9 +247,9 @@ static void logCase(Logger& log, const char* name, uint32_t textureVramBytes,
         }
     }
     LOG_CASE_VALUE("MISSED_VBLANKS", missedVblanks);
-    LOG_CASE_VALUE("WHITE_TEXTURE_FAULTS", 0);
+    LOG_CASE_VALUE("WHITE_TEXTURE_FAULTS", UINT32_MAX);
     std::snprintf(key, sizeof(key), "%s.WHITE_TEXTURE_FAULT_DETECTION", name);
-    log.line("RENDER", key, "VISUAL_CONFIRMATION_REQUIRED");
+    log.line("RENDER", key, "UNMEASURED_SENTINEL_VISUAL_CONFIRMATION_REQUIRED");
 #undef LOG_CASE_VALUE
     log.flush();
 }
