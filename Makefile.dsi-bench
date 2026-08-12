@@ -43,7 +43,7 @@ CPPFLAGS := \
 	-I$(TOPDIR)/$(BENCH_DIR) \
 	-I$(LIBNDS)/include \
 	-I$(CALICO)/include \
-	-I$(PORTLIBS)/include \
+	$(foreach d,$(PORTLIBS),-I$(d)/include) \
 	-DARM9 \
 	-D__NDS__ \
 	-DDSI_BENCH_GIT_REVISION=\"$(GIT_REVISION)\"
@@ -56,7 +56,7 @@ LDFLAGS := \
 	-Wl,--cref \
 	-Wl,-Map,$(abspath $(MAP))
 
-LIBPATHS := -L$(LIBNDS)/lib -L$(PORTLIBS)/lib -L$(CALICO)/lib
+LIBPATHS := -L$(LIBNDS)/lib $(foreach d,$(PORTLIBS),-L$(d)/lib) -L$(CALICO)/lib
 LIBS := -lfat -lnds9 -lcalico_ds9 -lm
 
 .PHONY: all dsi-bench clean print-config
