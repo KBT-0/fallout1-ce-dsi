@@ -15,7 +15,7 @@ and current/peak bytes, including GNW guard and alignment overhead.
 
 | Component | Bytes | Status | Measurement source |
 |---|---:|---|---|
-| Resident ARM9 code/rodata/data/bss | unknown | unknown | Phase 0A ELF + map |
+| Resident ARM9 lower-bound text/data/bss | 2,660,844 | measured lower bound | optimized Phase 0A ELF + map |
 | Engine baseline heap | unknown | unknown | GNW stats after engine init |
 | Logical 640x480x8 framebuffer | 307,200 | calculated | fixed allocation requirement |
 | Palette | 1,024 in SDL-shaped form; production format TBD | calculated/unknown | 256 RGBA entries now; DSi palette design pending |

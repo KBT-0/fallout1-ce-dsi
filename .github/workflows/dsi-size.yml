@@ -94,10 +94,11 @@ jobs:
 
             echo
             echo "=== toolchain ==="
+            ARM_SIZE="${DEVKITARM:-${DEVKITPRO:-/opt/devkitpro}/devkitARM}/bin/arm-none-eabi-size"
             command -v arm-none-eabi-g++ || true
             arm-none-eabi-g++ --version || true
-            command -v arm-none-eabi-size || true
-            arm-none-eabi-size --version || true
+            echo "${ARM_SIZE}"
+            "${ARM_SIZE}" --version || true
             make --version | head -n 2 || true
 
             echo
@@ -169,6 +170,7 @@ jobs:
         run: |
           set +e
           mkdir -p "${CI_OUT}/maps"
+          ARM_SIZE="${DEVKITARM:-${DEVKITPRO:-/opt/devkitpro}/devkitARM}/bin/arm-none-eabi-size"
 
           elf=""
           if [[ -f "${EXPECTED_ELF}" ]]; then
@@ -184,11 +186,20 @@ jobs:
             echo "FOUND_ELF=${elf:-NONE}"
             echo
             if [[ -n "${elf}" && -f "${elf}" ]]; then
-              echo "=== arm-none-eabi-size ==="
-              arm-none-eabi-size "${elf}" || true
-              echo
-              echo "=== arm-none-eabi-size -A ==="
-              arm-none-eabi-size -A "${elf}" || true
+              for measured_elf in \
+                build/fallout1-dsi-feasibility-baseline.elf \
+                build/fallout1-dsi-feasibility.elf; do
+                if [[ ! -f "${measured_elf}" ]]; then
+                  echo "MISSING_ELF=${measured_elf}"
+                  continue
+                fi
+                echo "=== arm-none-eabi-size ${measured_elf} ==="
+                "${ARM_SIZE}" "${measured_elf}" || true
+                echo
+                echo "=== arm-none-eabi-size -A ${measured_elf} ==="
+                "${ARM_SIZE}" -A "${measured_elf}" || true
+                echo
+              done
             else
               echo "No ELF was produced. See build.log for the first real ARM9 compiler/linker blocker."
             fi
@@ -234,3 +245,7 @@ jobs:
 
           test -s "${EXPECTED_ELF}"
           test -s "${EXPECTED_MAP}"
+          test -s build/fallout1-dsi-feasibility-baseline.elf
+          test -s build/fallout1-dsi-feasibility-baseline.map
+          grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9a-fA-F]+[[:space:]]+build/fallout1-dsi-feasibility-baseline\.elf$' "${CI_OUT}/size.txt"
+          grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9a-fA-F]+[[:space:]]+build/fallout1-dsi-feasibility\.elf$' "${CI_OUT}/size.txt"

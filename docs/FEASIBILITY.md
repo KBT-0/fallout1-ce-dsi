@@ -1,18 +1,17 @@
-# FEASIBILITY — Phase 0 Run 1, ARM9 CI pending
+# FEASIBILITY — Phase 0 ARM9 lower bound complete
 
 ## Current status
 
 ```text
-BLOCKED — run budget NOT consumed
+UNKNOWN — Phase 0A passes; Phase 0C/0D evidence pending
 ```
 
 No GO / CONDITIONAL GO / NO-GO decision is justified yet.
 
-The local environment has no devkitARM or configured melonDS. The checked-out
-source is present, and all 111 feasibility translation units compile and link
-with the host compiler and shim. This is a static closure check only, not an
-ARM9 measurement. GitHub Actions is the next authoritative compiler/linker
-environment.
+GitHub Actions run `31626178248` compiled all 111 feasibility translation
+units, linked baseline and optimized ARM9 ELFs, emitted both linker maps, and
+passed output enforcement. The optimized `text + data + bss` lower bound is
+2,660,844 bytes; see `SIZE_REPORT.md` for the exact breakdown and omissions.
 
 ## Source/reference evidence already established
 
@@ -28,19 +27,19 @@ fdb9cd7eca0d03191019c410f084196b6e1df972
 
 The maintained 3DS Makefile compiles the Fallout core directories plus `src/platform/ctr`, uses GNU++17, disables RTTI/exceptions, and links SDL2/Citro2D/Citro3D/libctru. The DSi feasibility Makefile mirrors the core source-directory set but replaces the CTR platform directory with a Phase-0 shim.
 
-The official current devkitPro ARM9 template uses:
+The current official devkitPro rules use:
 
 ```text
 -march=armv5te -mtune=arm946e-s
--specs=ds_arm9.specs
--lnds9
+-specs=${CALICO}/share/ds9.specs
+-lnds9 -lcalico_ds9
 ```
 
-The new `Makefile.dsi` follows that target model and does not copy 3DS ARMv6K/hard-float flags.
+`Makefile.dsi` follows that target model and does not copy 3DS ARMv6K/hard-float flags.
 
 ## Phase 0A status
 
-The CI path now has something real to measure:
+The CI path builds:
 
 ```text
 make -f Makefile.dsi feasibility-all
@@ -62,7 +61,7 @@ build/fallout1-dsi-feasibility.elf
 build/fallout1-dsi-feasibility.map
 ```
 
-Both successful linked ELFs remain:
+Both successful linked ELFs are classified:
 
 ```text
 LOWER BOUND
@@ -70,7 +69,8 @@ LOWER BOUND
 
 because the production DSi graphics/input/audio/filesystem backends are not linked yet and SDL is represented by a minimal compile/link shim.
 
-A failed CI build is still useful: `build/ci/build.log` becomes the first real ARMv5TE compiler/linker blocker list.
+Phase 0A passed after correcting portlibs expansion, isolating library paths
+from `ds_rules`, and using the current Calico startup contract.
 
 Phase 0C and 0D designs are now recorded in `RAM_BUDGET.md` and
 `RENDER_BENCH.md`. GNW current/peak allocation counters are exposed for the
@@ -137,28 +137,23 @@ allocation spikes + fragmentation headroom
 
 This is expected to be the main RAM GO/NO-GO determinant, not packaged executable size.
 
-### Priority 3 — Phase 0A: ARM9 code/static lower bound via CI
+### Priority 3 — production backend closure
 
-Run in parallel/background through GitHub Actions or local devkitPro:
+Replace the feasibility shim incrementally and measure the delta for:
 
 ```text
-arm-none-eabi-size
-arm-none-eabi-size -A
-linker map
-source-wide SDL inventory
+graphics and VRAM staging
+input
+filesystem/SD
+audio off/on
+benchmark logging
 ```
 
-Do not block all active 0C/0D design work waiting for this result, but ingest it as soon as CI returns.
-
-### Priority 4 — complete SDL/platform closure
-
-Use CI `sdl-symbols.txt` and `sdl-call-sites.txt` to replace the web audit with an exhaustive checked-out-source inventory and estimate the real production backend cost.
+Use the successful CI `sdl-symbols.txt` and `sdl-call-sites.txt` as the checked-out-source inventory. Preserve baseline/optimized map comparisons after each backend lands.
 
 ## Remaining authoritative unknowns
 
 ```text
-ARM9 .text/.rodata/.data/.bss
-linker-map largest contributors
 real DSi free heap under Unlaunch and TWiLight
 representative Fallout runtime working set
 real DSi VRAM upload/remap/render timing

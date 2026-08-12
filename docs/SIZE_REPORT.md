@@ -1,90 +1,126 @@
-# SIZE_REPORT — Phase 0 Run 1, ARM9 CI pending
+# SIZE_REPORT — Phase 0A ARM9 lower bound
 
 ## Result class
 
 ```text
-LOWER BOUND — numeric ARM9 result pending CI/local devkitPro
+LOWER BOUND — successful ARM9 compile and link
 ```
 
-No `.text/.data/.bss` value is invented.
+The result is from GitHub Actions run `31626178248`, commit
+`e6e14c222040a65d7256a42cda8af07119417569`. The successful artifact contains
+both ELF files and both linker maps. The generated evidence has also been
+unpacked under the local ignored `build/` directory.
 
-## What changed
+## Reproducible environment
 
-The prior CI harness had no build target. This is now fixed.
+- Container: `devkitpro/devkitarm:20260610`
+- devkitARM: `r68-1`
+- GCC/binutils packages: `devkitarm-gcc 16.1.0-1`,
+  `devkitarm-binutils 2.46.0-1`
+- libnds: `2.0.2-1`
+- Calico: `1.2.0-1`
+- NDS zlib: `1.3-1`
+- Architecture: `-march=armv5te -mtune=arm946e-s`
+- C++ policy: GNU++17, `-Os`, no RTTI, no exceptions, no LTO
+- Runtime link: Calico `ds9.specs`, `libnds9`, `libcalico_ds9`
 
-The repository patch provides:
+Baseline omits per-function/data sections and linker garbage collection.
+Optimized adds `-ffunction-sections -fdata-sections` and
+`-Wl,--gc-sections`.
 
-```text
-Makefile.dsi
-src/platform/dsi/feasibility/include/SDL.h
-src/platform/dsi/feasibility/include/SDL2/SDL.h
-src/platform/dsi/feasibility/sdl_feasibility_stubs.cc
-```
+## Measured section totals
 
-Command:
+Values are bytes from GNU `size` against the ARM9 ELF artifact.
 
-```bash
-make -f Makefile.dsi feasibility-all V=1
-```
+| Configuration | text | data | bss | total (`dec`) | Difference vs baseline |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 902,600 | 247,036 | 1,519,792 | 2,669,428 | — |
+| Optimized | 895,024 | 246,916 | 1,518,904 | 2,660,844 | -8,584 |
 
-Expected outputs when link succeeds:
+The optimized static footprint is about 2.54 MiB. Relative to nominal 16 MiB
+DSi RAM it leaves 14,116,372 bytes (about 13.46 MiB) before heap allocations,
+stacks, production platform backends, runtime caches, decoded assets, audio,
+filesystem buffers, and benchmark logging. This subtraction is not a working-set
+measurement and is not evidence that the 1 MiB runtime-headroom gate passes.
 
-```text
-build/fallout1-dsi-feasibility-baseline.elf
-build/fallout1-dsi-feasibility-baseline.map
-build/fallout1-dsi-feasibility.elf
-build/fallout1-dsi-feasibility.map
-```
+The optimized allocated-section detail includes:
 
-Baseline uses `-Os -fno-rtti -fno-exceptions` without per-function/data
-sections or `--gc-sections`. Optimized adds `-ffunction-sections`,
-`-fdata-sections` and `--gc-sections`. Neither uses LTO. Both target
-`-march=armv5te -mtune=arm946e-s` and use `ds_arm9.specs`.
+| Output section | Bytes |
+|---|---:|
+| `.secure` | 2,048 |
+| `.bootstub` | 408 |
+| `.crt0` | 960 |
+| `.vectors` | 32 |
+| `.itcm` | 1,604 |
+| `.dtcm.bss` | 152 |
+| `.main` | 890,800 |
+| `.main.rw` | 244,812 |
+| `.main.bss` | 1,518,752 |
+| ARM exception/unwind and init/fini arrays | 1,216 |
 
-The host-only closure link was 789,508 bytes text, 244,976 bytes data and
-1,764,392 bytes bss. It is not an ARM9 result, is affected by the host ABI and
-libraries, and is excluded from the measured table.
+Debug sections are present in the ELF but are not resident sections and are not
+included in the `text + data + bss` total.
 
-Then:
+## Largest optimized core contributors
 
-```bash
-arm-none-eabi-size build/fallout1-dsi-feasibility.elf
-arm-none-eabi-size -A build/fallout1-dsi-feasibility.elf
-```
+These figures aggregate allocated input sections by core object in the linker
+map. Runtime library contributions are excluded from this ranking.
 
-## Why the first number remains LOWER BOUND
+### Code and read-only data
 
-The target compiles the real Fallout core but substitutes a minimal SDL-shaped shim and does not yet link production DSi:
+| Object | Bytes |
+|---|---:|
+| `src/movie_lib.cc` | 50,472 |
+| `src/game/editor.cc` | 44,078 |
+| `src/game/inventry.cc` | 37,249 |
+| `src/game/object.cc` | 26,525 |
+| `src/int/support/intextra.cc` | 24,974 |
+| `src/game/worldmap.cc` | 24,554 |
+| `src/game/gdialog.cc` | 22,092 |
+| `src/game/combat.cc` | 19,811 |
 
-```text
-graphics / rectmap renderer
-input backend
-audio backend
-filesystem/SD backend
-benchmark/logging runtime
-production platform callbacks
-ARM7-side application support
-libnds/calico runtime attributable to the application
-```
+### Initialized writable data
 
-No defensible per-subsystem size allowance exists before the first ARM9 map and
-native benchmark skeleton are available. Allowances therefore remain
-`unknown`; they are not silently added to the lower bound.
+| Object | Bytes |
+|---|---:|
+| `src/game/worldmap_walkmask.cc` | 199,500 |
+| `src/game/combat.cc` | 24,338 |
+| `src/game/perk.cc` | 3,840 |
+| `src/game/worldmap.cc` | 2,310 |
 
-`--gc-sections` can also discard code that a production callback graph would keep alive.
+The 199,500-byte world-map walk mask is embedded as writable data. Moving it to
+an on-demand or immutable representation is a concrete later optimization
+candidate, not a Phase 0 measurement adjustment.
 
-Therefore the first successful ELF is a code/static lower bound, not final resident RAM.
+### Zero-initialized data
 
-## If the first build fails
+| Object | Bytes |
+|---|---:|
+| `src/game/light.cc` | 480,000 |
+| `src/plib/color/color.cc` | 231,577 |
+| `src/game/anim.cc` | 177,915 |
+| `src/game/object.cc` | 173,647 |
+| `src/game/map.cc` | 120,605 |
+| `src/int/export.cc` | 93,196 |
+| `src/game/gdialog.cc` | 34,070 |
+| `src/game/fontmgr.cc` | 33,037 |
 
-Do not weaken the target to a trivial subset.
+The largest single item is the three-elevation light-intensity grid:
+`int tile_intensity[ELEVATION_COUNT][HEX_GRID_SIZE]` (480,000 bytes).
 
-Return:
+## Why this remains a lower bound
 
-```text
-build/ci/build.log
-build/ci/sdl-symbols.txt
-build/ci/sdl-call-sites.txt
-```
+The target compiles all 110 selected Fallout/fpattern core translation units
+and one SDL feasibility shim, but does not yet link production DSi graphics,
+input, audio, filesystem/SD, benchmark/logging, or ARM7 application support.
+The shim also changes callback reachability, and optimized section garbage
+collection can discard code that a production backend will retain.
 
-Fix the first real ARM9 compile/link blockers until a meaningful core link is obtained.
+No unmeasured subsystem allowance is invented. Each remains `unknown` until a
+real implementation or benchmark provides evidence.
+
+## Decision
+
+Phase 0A compile/link feasibility passes. Overall DSi feasibility remains
+`UNKNOWN`, not `GO`: Phase 0C must measure representative peak working set and
+fragmentation, and Phase 0D must measure real-hardware render/VRAM upload cost.

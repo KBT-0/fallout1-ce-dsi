@@ -1,67 +1,47 @@
 # Run 1 report — PROJECT_v3 §34
 
 Measured:
-- No authoritative ARM9 ELF size or physical-DSi performance measurement yet.
-- Current sandbox still lacks `arm-none-eabi-g++`, `arm-none-eabi-size`, and melonDS.
-- Previous network audit established general outbound shell DNS blocking rather than a Git-only failure.
-- Docker Hub publication was verified and CI is pinned to `devkitpro/devkitarm:20260610`.
-- Existing 3DS package-size pre-signal remains `INDICATIVE — NOT MEASURED, DIFFERENT ARCH/SDK` and is excluded from GO/NO-GO.
+- GitHub Actions run `31626178248` compiled and linked the 111-unit ARM9 feasibility closure with devkitARM r68, GCC 16.1.0, libnds 2.0.2, and Calico 1.2.0.
+- Baseline ELF: text 902,600; data 247,036; bss 1,519,792; total 2,669,428 bytes.
+- Optimized ELF: text 895,024; data 246,916; bss 1,518,904; total 2,660,844 bytes.
+- Section GC saved 8,584 bytes against the baseline.
+- Largest optimized core allocations include 480,000 bytes BSS in `light.cc`, 231,577 bytes BSS in `color.cc`, and 199,500 bytes writable data in `worldmap_walkmask.cc`.
 
 Implemented:
-- Added `Makefile.dsi` with an explicit `feasibility` target.
-- ARM9 target uses `-march=armv5te -mtune=arm946e-s`; no 3DS ARMv6K/hard-float flags.
-- Added required `-Os`, function/data sections and `--gc-sections`.
-- Added exact map output `build/fallout1-dsi-feasibility.map`.
-- Added exact ELF output `build/fallout1-dsi-feasibility.elf`.
-- Added minimal SDL2-shaped Phase-0 compile/link shim under `src/platform/dsi/feasibility`.
-- Closed the checked-out SDL surface needed by all 111 feasibility translation units.
-- Vendored fpattern v1.9 at commit `96f42d01b0879a0f8938ec9cb6046209c4a19f3d` because the Makefile cannot use CMake FetchContent.
-- Added baseline and optimized lower-bound configurations.
-- Updated GitHub Actions workflow to pinned `devkitpro/devkitarm:20260610`.
-- Added container Git `safe.directory` configuration.
-- Added explicit libnds and `ndstool` checks.
-- Added `dkp-pacman -S --needed --noconfirm nds-dev` recovery when DS prerequisites are absent.
-- Added `nds-zlib` recovery when the DS zlib portlib is absent.
-- Preserved failed-build logs and always-uploaded size/map/ELF/SDL inventory artifacts.
-- Updated local/container `scripts/ci-dsi-size.sh` to match the workflow.
-- Included `CTR_AUDIT.md` and `SDL_AUDIT.md` in the handoff.
-- Reordered `FEASIBILITY.md` next evidence by information value: Phase 0D render first, Phase 0C working set second, Phase 0A CI in parallel.
-- Added `RAM_BUDGET.md`, exposed GNW current/peak allocation counters and documented uncovered direct allocations.
-- Added `RENDER_BENCH.md` with CPU, 2D, 3D, dirty-update, hybrid and dual-3D cases.
+- Added baseline and optimized ARM9 feasibility builds with exact ELF/map contracts.
+- Expanded every devkitPro portlibs root correctly and isolated project library paths from `ds_rules` variables.
+- Linked with the current supported Calico `ds9.specs` and `libcalico_ds9` startup runtime.
+- Added and closed the checked-out SDL feasibility surface for all selected core sources.
+- Added Phase 0C GNW current/peak byte and block instrumentation plus checkpoint and gap design.
+- Added Phase 0D CPU/2D/3D/dirty/hybrid/dual-screen benchmark and VRAM layout design.
+- Made CI preserve logs/maps/ELFs on failure and enforce successful baseline/optimized output evidence.
 
 Built:
-- No ARM9 ELF built in this sandbox because devkitARM is unavailable locally.
-- The feasibility build target now exists and can be executed immediately in CI/local devkitPro.
-- A host-only closure ELF linked successfully; its size is not an ARM9 result.
+- `build/fallout1-dsi-feasibility-baseline.elf`
+- `build/fallout1-dsi-feasibility-baseline.map`
+- `build/fallout1-dsi-feasibility.elf`
+- `build/fallout1-dsi-feasibility.map`
 
 Tested:
-- `scripts/ci-dsi-size.sh` passes `bash -n` syntax validation.
-- `git diff --check` passes.
-- `Makefile.dsi` parses and exposes the `feasibility` target under a synthetic ds_rules dry-run harness.
-- All 111 feasibility translation units compile and link with the host compiler and shim; real ARM9 compilation remains authoritative.
+- All 110 real Fallout/fpattern core translation units plus the SDL shim compile for ARMv5TE.
+- Both ARM9 configurations link with libnds, NDS zlib, Calico, libm, and the DS9 startup runtime.
+- Local host closure compile/link, shell syntax, whitespace, and exact Make dry-run checks pass.
+- GitHub Actions compile, link, artifact upload, and output enforcement pass.
 
 Unknown:
-- First real ARMv5TE compiler error in the checked-out Fallout source.
-- Whether the initial shim covers every SDL type/symbol needed to reach link stage.
-- ARM9 `.text/.rodata/.data/.bss`.
-- Largest linker-map contributors.
-- `std::recursive_mutex`/thread-runtime compatibility on the chosen DS toolchain.
-- Real DSi free heap and fragmentation behavior.
-- Real map/art/script/audio working set.
-- Real DSi VRAM remap/upload timing and sustainable FPS.
-- Real SD throughput/latency.
+- Representative real-gameplay peak working set, largest free block, fragmentation, and retained allocations.
+- Production DSi backend code/static/heap deltas.
+- Real DSi VRAM remap/upload/render timing and sustainable p95/worst FPS.
+- Real DSi SD throughput/latency and audio CPU/RAM cost.
 
 Current feasibility status:
-BLOCKED — Run 1 budget NOT consumed.
+UNKNOWN — Phase 0A compile/link passes; Phase 0C and Phase 0D still control the GO/NO-GO decision.
 
 Current blocker:
-This sandbox cannot execute devkitARM or melonDS. GitHub Actions must now
-provide the ARM9 compiler/linker evidence.
+No software/CI blocker. Authoritative Phase 0D timing ultimately requires physical Nintendo DSi hardware.
 
 Next highest-value action:
-Push the current branch, inspect the `DSi Phase 0 size feasibility` workflow and
-iterate its ARM9 errors. In parallel, turn the recorded Phase 0D matrix into the
-unified `dsi-bench.nds` implementation.
+Implement the unified `dsi-bench.nds` runtime so Phase 0D render timing and Phase 0C heap checkpoints are produced by one hardware-testable artifact.
 
 Hardware test required:
-Not for the Phase 0A CI run. A real DSi becomes mandatory as soon as the unified Phase 0D renderer benchmark is buildable; melonDS timing must not be used for GO/NO-GO.
+Yes for authoritative Phase 0D timing and final Phase 0C environment measurements; emulator timing is invalid for GO/NO-GO.

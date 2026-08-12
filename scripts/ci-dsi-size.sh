@@ -8,6 +8,7 @@ CI_OUT="${CI_OUT:-build/ci}"
 EXPECTED_ELF="${EXPECTED_ELF:-build/fallout1-dsi-feasibility.elf}"
 EXPECTED_MAP="${EXPECTED_MAP:-build/fallout1-dsi-feasibility.map}"
 DEVKITPRO_DIR="${DEVKITPRO:-/opt/devkitpro}"
+ARM_SIZE="${ARM_SIZE:-${DEVKITARM:-${DEVKITPRO_DIR}/devkitARM}/bin/arm-none-eabi-size}"
 
 mkdir -p "${CI_OUT}"
 
@@ -40,8 +41,8 @@ fi
   echo "=== tools ==="
   command -v arm-none-eabi-g++ || true
   arm-none-eabi-g++ --version || true
-  command -v arm-none-eabi-size || true
-  arm-none-eabi-size --version || true
+  echo "${ARM_SIZE}"
+  "${ARM_SIZE}" --version || true
   command -v ndstool || true
   ndstool -h 2>&1 | head -n 30 || true
   echo
@@ -81,11 +82,20 @@ fi
   echo "FOUND_ELF=${elf:-NONE}"
   echo
   if [[ -n "${elf}" && -f "${elf}" ]]; then
-    echo "=== arm-none-eabi-size ==="
-    arm-none-eabi-size "${elf}" || true
-    echo
-    echo "=== arm-none-eabi-size -A ==="
-    arm-none-eabi-size -A "${elf}" || true
+    for measured_elf in \
+      build/fallout1-dsi-feasibility-baseline.elf \
+      build/fallout1-dsi-feasibility.elf; do
+      if [[ ! -f "${measured_elf}" ]]; then
+        echo "MISSING_ELF=${measured_elf}"
+        continue
+      fi
+      echo "=== arm-none-eabi-size ${measured_elf} ==="
+      "${ARM_SIZE}" "${measured_elf}" || true
+      echo
+      echo "=== arm-none-eabi-size -A ${measured_elf} ==="
+      "${ARM_SIZE}" -A "${measured_elf}" || true
+      echo
+    done
   else
     echo "No ELF was produced. See build.log."
   fi
@@ -100,6 +110,15 @@ done < "${CI_OUT}/maps-found.txt"
 
 if [[ -n "${elf}" && -f "${elf}" ]]; then
   cp -f "${elf}" "${CI_OUT}/$(basename "${elf}")" || true
+fi
+
+if [[ "${build_status}" -eq 0 ]]; then
+  test -s "${EXPECTED_ELF}" || build_status=1
+  test -s "${EXPECTED_MAP}" || build_status=1
+  test -s build/fallout1-dsi-feasibility-baseline.elf || build_status=1
+  test -s build/fallout1-dsi-feasibility-baseline.map || build_status=1
+  grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9a-fA-F]+[[:space:]]+build/fallout1-dsi-feasibility-baseline\.elf$' "${CI_OUT}/size.txt" || build_status=1
+  grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9a-fA-F]+[[:space:]]+build/fallout1-dsi-feasibility\.elf$' "${CI_OUT}/size.txt" || build_status=1
 fi
 
 exit "${build_status}"
