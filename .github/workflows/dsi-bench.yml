@@ -1,0 +1,69 @@
+name: DSi Phase 0 unified benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Makefile.dsi-bench"
+      - "src/platform/dsi/bench/**"
+      - "tests/dsi_rectmap_test.cpp"
+      - "scripts/ci-dsi-bench.sh"
+      - "scripts/test-dsi-bench-host.sh"
+      - ".github/workflows/dsi-bench.yml"
+      - "docs/RAM_BUDGET.md"
+      - "docs/RENDER_BENCH.md"
+      - "PROJECT_v3.md"
+
+permissions:
+  contents: read
+
+jobs:
+  dsi-bench:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:20260610
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Mark workspace safe for container git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Ensure Nintendo DS development packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${DEVKITPRO:-/opt/devkitpro}/libnds/lib/libnds9.a" ]] \
+              || [[ ! -f "${DEVKITPRO:-/opt/devkitpro}/portlibs/nds/lib/libfat.a" ]] \
+              || ! command -v ndstool >/dev/null 2>&1; then
+            dkp-pacman -S --needed --noconfirm nds-dev
+          fi
+
+      - name: Run host rectmap self-test
+        shell: bash
+        run: scripts/test-dsi-bench-host.sh
+
+      - name: Build DSi benchmark image
+        shell: bash
+        run: scripts/ci-dsi-bench.sh | tee build/dsi-bench-ci.txt
+
+      - name: Record ROM header
+        shell: bash
+        run: ndstool -i build/dsi-bench.nds | tee build/dsi-bench-header.txt
+
+      - name: Upload hardware benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsi-phase0-bench-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            build/dsi-bench.nds
+            build/dsi-bench.elf
+            build/dsi-bench.map
+            build/dsi-bench-ci.txt
+            build/dsi-bench-header.txt

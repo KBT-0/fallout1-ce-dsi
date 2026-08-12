@@ -1,0 +1,100 @@
+# Fallout 1 CE — Nintendo DSi Phase 0 unified hardware benchmark
+
+.SUFFIXES:
+
+ifeq ($(strip $(DEVKITARM)),)
+$(error "Please set DEVKITARM in your environment")
+endif
+
+TOPDIR := $(CURDIR)
+include $(DEVKITARM)/ds_rules
+.DEFAULT_GOAL := dsi-bench
+
+ifeq ($(strip $(DEVKITPRO)),)
+DEVKITPRO := $(abspath $(DEVKITARM)/..)
+endif
+ifeq ($(strip $(LIBNDS)),)
+LIBNDS := $(DEVKITPRO)/libnds
+endif
+ifeq ($(strip $(PORTLIBS)),)
+PORTLIBS := $(DEVKITPRO)/portlibs/nds
+endif
+
+BUILD := build
+BENCH_DIR := src/platform/dsi/bench
+OBJDIR := $(BUILD)/dsi_bench_obj
+ELF := $(BUILD)/dsi-bench.elf
+MAP := $(BUILD)/dsi-bench.map
+NDS := $(BUILD)/dsi-bench.nds
+ARM7_ELF := $(CALICO)/bin/ds7_maine.elf
+ICON := $(CALICO)/share/nds-icon.bmp
+
+SOURCES := $(wildcard $(BENCH_DIR)/*.cpp)
+OBJECTS := $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES))
+DEPS := $(OBJECTS:.o=.d)
+
+ARCH := -march=armv5te -mtune=arm946e-s
+COMMON_FLAGS := -g -Wall -Wextra -Os -ffunction-sections -fdata-sections \
+	-fomit-frame-pointer $(ARCH)
+CXXFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -std=gnu++17
+GIT_REVISION := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+
+CPPFLAGS := \
+	-I$(TOPDIR)/$(BENCH_DIR) \
+	-I$(LIBNDS)/include \
+	-I$(CALICO)/include \
+	-I$(PORTLIBS)/include \
+	-DARM9 \
+	-D__NDS__ \
+	-DDSI_BENCH_GIT_REVISION=\"$(GIT_REVISION)\"
+
+LDFLAGS := \
+	-specs=$(CALICO)/share/ds9.specs \
+	-g \
+	$(ARCH) \
+	-Wl,--gc-sections \
+	-Wl,--cref \
+	-Wl,-Map,$(abspath $(MAP))
+
+LIBPATHS := -L$(LIBNDS)/lib -L$(PORTLIBS)/lib -L$(CALICO)/lib
+LIBS := -lfat -lnds9 -lcalico_ds9 -lm
+
+.PHONY: all dsi-bench clean print-config
+
+all: dsi-bench
+
+dsi-bench: print-config $(NDS)
+	@echo
+	@echo "DSi benchmark ELF: $(ELF)"
+	@echo "DSi benchmark map: $(MAP)"
+	@echo "DSi benchmark NDS: $(NDS)"
+
+print-config:
+	@echo "=== Fallout 1 CE DSi unified benchmark ==="
+	@echo "DEVKITPRO=$(DEVKITPRO)"
+	@echo "DEVKITARM=$(DEVKITARM)"
+	@echo "LIBNDS=$(LIBNDS)"
+	@echo "CALICO=$(CALICO)"
+	@echo "GIT_REVISION=$(GIT_REVISION)"
+
+$(NDS): $(ELF) $(ARM7_ELF) $(ICON)
+	@mkdir -p $(dir $@)
+	@echo "NDSTOOL $@"
+	ndstool -c $@ -9 $(ELF) -7 $(ARM7_ELF) \
+		-b $(ICON) "Fallout 1;DSi Phase 0;Benchmark" \
+		-g F1DB 00 "F1 DSI BENCH"
+
+$(ELF): $(OBJECTS)
+	@mkdir -p $(dir $@)
+	@echo "LINK $@"
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(LIBPATHS) $(LIBS) -o $@
+
+$(OBJDIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "CXX  $<"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+clean:
+	@rm -rf $(OBJDIR) $(ELF) $(MAP) $(NDS)
+
+-include $(DEPS)
