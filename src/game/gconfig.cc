@@ -10,6 +10,10 @@
 #include "plib/gnw/debug.h"
 #endif
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#endif
+
 namespace fallout {
 
 // A flag indicating if `game_config` was initialized.
@@ -82,7 +86,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     config_set_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_TAUNTS_KEY, 1);
     config_set_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, 0);
     config_set_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_RUNNING_KEY, 0);
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__DSI__)
     config_set_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_SUBTITLES_KEY, 1);
 #else
     config_set_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_SUBTITLES_KEY, 0);
@@ -101,7 +105,10 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SOUNDS_KEY, 1);
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_KEY, 1);
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_KEY, 1);
-#ifdef __3DS__
+#ifdef __DSI__
+    strcpy(gconfig_file_name, GAME_CONFIG_FILE_NAME);
+    config_load(&game_config, gconfig_file_name, false);
+#elif defined(__3DS__)
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MASTER_VOLUME_KEY, 32767);
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_VOLUME_KEY, 32767);
     config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SNDFX_VOLUME_KEY, 32767);
@@ -174,6 +181,25 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     // Add key-values from command line, which overrides both defaults and
     // whatever was loaded from `fallout.cfg`.
     config_cmd_line_parse(&game_config, argc, argv);
+
+#ifdef __DSI__
+    // A clean PC fallout.cfg commonly contains absolute install paths and a
+    // cache sized for a desktop. Keep the first DSi boot dataset-relative and
+    // silent. The 4 MiB cap is a bootstrap guard, not a final cache decision.
+    config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_DAT_KEY, "master.dat");
+    config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, "data");
+    config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_DAT_KEY, "critter.dat");
+    config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_PATCHES_KEY, "data");
+    config_set_value(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_ART_CACHE_SIZE_KEY, 4);
+    config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_INITIALIZE_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SOUNDS_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_KEY, 0);
+    dsiLog("CONFIG.FILE=%s\n", gconfig_file_name);
+    dsiLog("CONFIG.DATA_PATHS=DATASET_RELATIVE\n");
+    dsiLog("CONFIG.ART_CACHE_MIB=4_BOOTSTRAP_CAP\n");
+    dsiLog("CONFIG.AUDIO=DISABLED_BOOTSTRAP\n");
+#endif
 
     gconfig_initialized = true;
 

@@ -62,6 +62,13 @@
 #include "platform/ctr/ctr_rectmap.h"
 #endif
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#define DSI_STARTUP_STAGE(name) dsiStartupStage(name)
+#else
+#define DSI_STARTUP_STAGE(name) ((void)0)
+#endif
+
 namespace fallout {
 
 #define HELP_SCREEN_WIDTH 640
@@ -133,14 +140,19 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 {
     char path[COMPAT_MAX_PATH];
 
+    DSI_STARTUP_STAGE("GMEMORY_INIT");
     if (gmemory_init() == -1) {
         return -1;
     }
 
-    gconfig_init(isMapper, argc, argv);
+    DSI_STARTUP_STAGE("GCONFIG_INIT");
+    if (!gconfig_init(isMapper, argc, argv)) {
+        return -1;
+    }
 
     game_in_mapper = isMapper;
 
+    DSI_STARTUP_STAGE("DATABASE_INIT");
     if (game_init_databases() == -1) {
         gconfig_exit(false);
         return -1;
@@ -182,13 +194,20 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
         config_exit(&resolutionConfig);
     }
 
+    DSI_STARTUP_STAGE("WINDOW_INIT");
     initWindow(&video_options, flags);
+    DSI_STARTUP_STAGE("PALETTE_INIT");
     palette_init();
 
     if (!game_in_mapper) {
+#ifdef __DSI__
+        dsiLog("STARTUP.SPLASH=SKIPPED_BOOTSTRAP\n");
+#else
         game_splash_screen();
+#endif
     }
 
+    DSI_STARTUP_STAGE("FONT_INIT");
     FMInit();
     text_add_manager(&alias_mgr);
     text_font(font);
@@ -202,6 +221,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     // properly initialized yet.
     KillOldMaps();
 
+    DSI_STARTUP_STAGE("GAMEPLAY_TABLES_INIT");
     roll_init();
     init_message();
     skill_init();
@@ -214,12 +234,14 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     combat_ai_init();
     inven_reset_dude();
 
+    DSI_STARTUP_STAGE("AUDIO_INIT_SILENT");
     if (gsound_init() != 0) {
         debug_printf("Sound initialization failed.\n");
     }
 
     debug_printf(">gsound_init\t");
 
+    DSI_STARTUP_STAGE("MOVIE_SYSTEM_INIT");
     initMovie();
     debug_printf(">initMovie\t\t");
 
@@ -237,6 +259,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">moviefx_init\t");
 
+    DSI_STARTUP_STAGE("ISO_INIT");
     if (iso_init() != 0) {
         debug_printf("Failed on iso_init\n");
         return -1;
@@ -244,6 +267,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">iso_init\t");
 
+    DSI_STARTUP_STAGE("MOUSE_INIT");
     if (gmouse_init() != 0) {
         debug_printf("Failed on gmouse_init\n");
         return -1;
@@ -251,6 +275,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">gmouse_init\t");
 
+    DSI_STARTUP_STAGE("PROTO_INIT");
     if (proto_init() != 0) {
         debug_printf("Failed on proto_init\n");
         return -1;
@@ -261,6 +286,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     anim_init();
     debug_printf(">anim_init\t");
 
+    DSI_STARTUP_STAGE("SCRIPT_INIT");
     if (scr_init() != 0) {
         debug_printf("Failed on scr_init\n");
         return -1;
@@ -268,6 +294,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">scr_init\t");
 
+    DSI_STARTUP_STAGE("GAME_INFO_INIT");
     if (game_load_info() != 0) {
         debug_printf("Failed on game_load_info\n");
         return -1;
@@ -282,6 +309,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">scr_game_init\t");
 
+    DSI_STARTUP_STAGE("WORLDMAP_INIT");
     if (init_world_map() != 0) {
         debug_printf("Failed on init_world_map\n");
         return -1;
@@ -319,6 +347,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">automap_init\t");
 
+    DSI_STARTUP_STAGE("MISC_MESSAGES_INIT");
     if (!message_init(&misc_message_file)) {
         debug_printf("Failed on message_init\n");
         return -1;
@@ -342,6 +371,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">scr_disable\t");
 
+    DSI_STARTUP_STAGE("OPTIONS_INIT");
     if (init_options_menu() != 0) {
         debug_printf("Failed on init_options_menu\n");
         return -1;
@@ -349,6 +379,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">init_options_menu\n");
 
+    DSI_STARTUP_STAGE("GAME_INIT_COMPLETE");
     return 0;
 }
 
@@ -426,7 +457,7 @@ void game_exit()
     FMExit();
     windowClose();
     db_exit();
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__DSI__)
     gconfig_exit(false); // only save when config is actually changed..
 #else
     gconfig_exit(true);
@@ -1261,7 +1292,9 @@ static int game_init_databases()
 
     master_db_handle = db_init(main_file_name, NULL, patch_file_name, 1);
     if (master_db_handle == INVALID_DATABASE_HANDLE) {
-#ifdef __3DS__
+#ifdef __DSI__
+        GNWSystemError("Missing master.dat in sd:/fallout1/original/.");
+#elif defined(__3DS__)
         GNWSystemError("Could not find the master datafile.\n\nPlease move 'MASTER.DAT'\nto 'sdmc:/3ds/fallout/'");
 #else
         GNWSystemError("Could not find the master datafile. Please make sure the FALLOUT CD is in the drive and that you are running FALLOUT from the directory you installed it to.");
@@ -1282,7 +1315,9 @@ static int game_init_databases()
     critter_db_handle = db_init(main_file_name, NULL, patch_file_name, 1);
     if (critter_db_handle == INVALID_DATABASE_HANDLE) {
         db_select(master_db_handle);
-#ifdef __3DS__
+#ifdef __DSI__
+        GNWSystemError("Missing critter.dat in sd:/fallout1/original/.");
+#elif defined(__3DS__)
         GNWSystemError("Could not find the critter datafile.\n\nPlease move 'CRITTER.DAT'\nto 'sdmc:/3ds/fallout/'");
 #else
         GNWSystemError("Could not find the critter datafile. Please make sure the FALLOUT CD is in the drive and that you are running FALLOUT from the directory you installed it to.");

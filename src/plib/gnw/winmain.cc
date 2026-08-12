@@ -10,6 +10,7 @@
 
 #include "game/main.h"
 #include "plib/gnw/gnw.h"
+#include "plib/gnw/debug.h"
 #include "plib/gnw/svga.h"
 
 #if __APPLE__ && TARGET_OS_IOS
@@ -18,6 +19,10 @@
 
 #ifdef __3DS__
 #include "platform/ctr/ctr_sys.h"
+#endif
+
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
 #endif
 
 namespace fallout {
@@ -33,9 +38,26 @@ HANDLE GNW95_mutex = NULL;
 // 0x6B0760
 char GNW95_title[256];
 
+#ifdef __DSI__
+static int dsiDebugOutput(char* text)
+{
+    dsiLog("ENGINE.DEBUG=%s", text != nullptr ? text : "");
+    return 0;
+}
+#endif
+
 int main(int argc, char* argv[])
 {
     int rc;
+
+#ifdef __DSI__
+    if (!dsiRuntimeInit()) {
+        return 1;
+    }
+    atexit(dsiRuntimeShutdown);
+    dsiStartupStage("ENGINE_ENTRY");
+    debug_register_func(dsiDebugOutput);
+#endif
 
 #if _WIN32
     GNW95_mutex = CreateMutexA(0, TRUE, "GNW95MUTEX");
@@ -82,6 +104,10 @@ int main(int argc, char* argv[])
 
     GNW95_isActive = true;
     rc = gnw_main(argc, argv);
+
+#ifdef __DSI__
+    dsiStartupStage(rc == 0 ? "ENGINE_EXIT_OK" : "ENGINE_EXIT_ERROR");
+#endif
 
 #if _WIN32
     CloseHandle(GNW95_mutex);

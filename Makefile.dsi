@@ -1,15 +1,15 @@
-# Fallout 1 CE — Nintendo DSi Phase 0 feasibility build
+# Fallout 1 CE — Nintendo DSi builds
 #
 # Purpose:
-#   Compile/link as much real Fallout 1 CE core code as possible for ARM9/DSi
-#   while temporarily replacing SDL/platform-facing calls with a minimal shim.
+#   Keep the accepted Phase 0A lower-bound probes and build the real DSi
+#   runtime image from the same Fallout CE engine source set.
 #
-# This target is a LOWER BOUND size probe, not a playable port.
-# It intentionally does NOT build an .nds runtime image yet.
-#
+# The feasibility targets remain LOWER BOUND probes; `dsi-game` is the
+# production runtime target.
 # Expected outputs:
 #   build/fallout1-dsi-feasibility.elf
 #   build/fallout1-dsi-feasibility.map
+#   build/fallout1-dsi.nds
 
 .SUFFIXES:
 
@@ -44,17 +44,28 @@ OBJDIR     := $(BUILD)/feasibility_obj_baseline
 TARGET     := fallout1-dsi-feasibility-baseline
 SECTION_FLAGS :=
 GC_LDFLAGS :=
+BUILD_DEFINES := -DFALLOUT_DSI_FEASIBILITY=1
 else ifeq ($(CONFIG),optimized)
 OBJDIR     := $(BUILD)/feasibility_obj
 TARGET     := fallout1-dsi-feasibility
 SECTION_FLAGS := -ffunction-sections -fdata-sections
 GC_LDFLAGS := -Wl,--gc-sections
+BUILD_DEFINES := -DFALLOUT_DSI_FEASIBILITY=1
+else ifeq ($(CONFIG),game)
+OBJDIR     := $(BUILD)/dsi_game_obj
+TARGET     := fallout1-dsi
+SECTION_FLAGS := -ffunction-sections -fdata-sections
+GC_LDFLAGS := -Wl,--gc-sections
+BUILD_DEFINES := -D__DSI__=1 -DFALLOUT_DSI_GAME=1
 else
-$(error "CONFIG must be 'baseline' or 'optimized'")
+$(error "CONFIG must be 'baseline', 'optimized', or 'game'")
 endif
 
 ELF        := $(BUILD)/$(TARGET).elf
 MAP        := $(BUILD)/$(TARGET).map
+NDS        := $(BUILD)/$(TARGET).nds
+ARM7_ELF   := $(CALICO)/bin/ds7_maine.elf
+ICON       := $(CALICO)/share/nds-icon.bmp
 
 # -----------------------------------------------------------------------------
 # Source layout mirrors the maintained 3DS Makefile's Fallout core directories,
@@ -73,7 +84,8 @@ CORE_DIRS := \
 	third_party/fpattern/vendor
 
 FEAS_DIR := src/platform/dsi/feasibility
-SOURCE_DIRS := $(CORE_DIRS) $(FEAS_DIR)
+RUNTIME_DIR := src/platform/dsi/runtime
+SOURCE_DIRS := $(CORE_DIRS) $(FEAS_DIR) $(RUNTIME_DIR)
 
 CORE_C_SOURCES   := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.c))
 CORE_CC_SOURCES  := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cc))
@@ -81,9 +93,12 @@ CORE_CPP_SOURCES := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cpp))
 STUB_C_SOURCES   := $(wildcard $(FEAS_DIR)/*.c)
 STUB_CC_SOURCES  := $(wildcard $(FEAS_DIR)/*.cc)
 STUB_CPP_SOURCES := $(wildcard $(FEAS_DIR)/*.cpp)
-C_SOURCES   := $(CORE_C_SOURCES) $(STUB_C_SOURCES)
-CC_SOURCES  := $(CORE_CC_SOURCES) $(STUB_CC_SOURCES)
-CPP_SOURCES := $(CORE_CPP_SOURCES) $(STUB_CPP_SOURCES)
+RUNTIME_C_SOURCES   := $(wildcard $(RUNTIME_DIR)/*.c)
+RUNTIME_CC_SOURCES  := $(wildcard $(RUNTIME_DIR)/*.cc)
+RUNTIME_CPP_SOURCES := $(wildcard $(RUNTIME_DIR)/*.cpp)
+C_SOURCES   := $(CORE_C_SOURCES) $(STUB_C_SOURCES) $(RUNTIME_C_SOURCES)
+CC_SOURCES  := $(CORE_CC_SOURCES) $(STUB_CC_SOURCES) $(RUNTIME_CC_SOURCES)
+CPP_SOURCES := $(CORE_CPP_SOURCES) $(STUB_CPP_SOURCES) $(RUNTIME_CPP_SOURCES)
 
 C_OBJECTS   := $(patsubst %.c,$(OBJDIR)/%.o,$(C_SOURCES))
 CC_OBJECTS  := $(patsubst %.cc,$(OBJDIR)/%.o,$(CC_SOURCES))
@@ -116,7 +131,8 @@ FEAS_INCLUDE := $(TOPDIR)/$(FEAS_DIR)/include
 INCLUDE_FLAGS := \
 	-I$(FEAS_INCLUDE) \
 	$(foreach d,$(CORE_DIRS),-I$(TOPDIR)/$(d)) \
-	-I$(LIBNDS)/include
+	-I$(LIBNDS)/include \
+	-I$(CALICO)/include
 
 ifneq ($(strip $(PORTLIBS)),)
 INCLUDE_FLAGS += $(foreach d,$(PORTLIBS),-I$(d)/include)
@@ -127,7 +143,7 @@ CPPFLAGS := \
 	-DARM9 \
 	-D__NDS__ \
 	-Dunix \
-	-DFALLOUT_DSI_FEASIBILITY=1 \
+	$(BUILD_DEFINES) \
 	-DSDL_MAIN_HANDLED
 
 # Current ds_rules translates ds_arm9.specs to Calico's DS9 runtime specs and
@@ -149,9 +165,9 @@ FEAS_LIBPATHS += -L$(CALICO)/lib
 
 # Fallout CE's maintained 3DS build links zlib. nds-zlib is supplied through
 # devkitPro portlibs; CI attempts to install it when absent.
-LIBS := -lz -lnds9 -lcalico_ds9 -lm
+LIBS := -lfat -lz -lnds9 -lcalico_ds9 -lm
 
-.PHONY: all feasibility feasibility-all feasibility-baseline clean print-feasibility-config
+.PHONY: all feasibility feasibility-all feasibility-baseline dsi-game game-image clean print-feasibility-config
 
 all: feasibility
 
@@ -163,6 +179,15 @@ feasibility-all:
 
 feasibility-baseline:
 	$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) CONFIG=baseline feasibility
+
+dsi-game:
+	$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) CONFIG=game game-image
+
+game-image: print-feasibility-config $(NDS)
+	@echo
+	@echo "DSi game ELF: $(ELF)"
+	@echo "DSi game map: $(MAP)"
+	@echo "DSi game NDS: $(NDS)"
 
 # Explicit target required by PROJECT_v3 §5/§32 and the CI workflow.
 feasibility: print-feasibility-config $(ELF)
@@ -182,6 +207,14 @@ print-feasibility-config:
 	@echo "CXX=$(CXX)"
 	@echo "Core source files: $(words $(CORE_C_SOURCES) $(CORE_CC_SOURCES) $(CORE_CPP_SOURCES))"
 	@echo "Stub source files: $(words $(STUB_C_SOURCES) $(STUB_CC_SOURCES) $(STUB_CPP_SOURCES))"
+	@echo "Runtime source files: $(words $(RUNTIME_C_SOURCES) $(RUNTIME_CC_SOURCES) $(RUNTIME_CPP_SOURCES))"
+
+$(NDS): $(ELF) $(ARM7_ELF) $(ICON)
+	@mkdir -p $(dir $@)
+	@echo "NDSTOOL $@"
+	ndstool -c $@ -9 $(ELF) -7 $(ARM7_ELF) \
+		-b $(ICON) "Fallout 1 CE;Nintendo DSi;Main-menu build" \
+		-g F1DG 00 "FALLOUT1 DSI"
 
 $(ELF): $(OBJECTS)
 	@mkdir -p $(dir $@)
@@ -210,6 +243,10 @@ clean:
 		$(BUILD)/fallout1-dsi-feasibility.elf \
 		$(BUILD)/fallout1-dsi-feasibility.map \
 		$(BUILD)/fallout1-dsi-feasibility-baseline.elf \
-		$(BUILD)/fallout1-dsi-feasibility-baseline.map
+		$(BUILD)/fallout1-dsi-feasibility-baseline.map \
+		$(BUILD)/dsi_game_obj \
+		$(BUILD)/fallout1-dsi.elf \
+		$(BUILD)/fallout1-dsi.map \
+		$(BUILD)/fallout1-dsi.nds
 
 -include $(DEPS)

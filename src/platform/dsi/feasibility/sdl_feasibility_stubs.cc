@@ -1,5 +1,10 @@
 #include <SDL.h>
 
+#include "platform/dsi/runtime/dsi_runtime.h"
+#include "platform/dsi/runtime/dsi_video.h"
+
+#include <nds.h>
+
 #include <ctype.h>
 #include <stdio.h>
 
@@ -10,7 +15,106 @@ struct SDL_AudioStream { int unused; };
 struct SDL_Cursor { int unused; };
 
 static Uint32 gInitFlags = 0;
-static Uint32 gFakeTicks = 0;
+static int gRelativeMouseX = 0;
+static int gRelativeMouseY = 0;
+static int gVirtualMouseX = 320;
+static int gVirtualMouseY = 240;
+static Uint32 gMouseButtons = 0;
+static bool gTouchHeld = false;
+static int gLastTouchPx = -1;
+static int gLastTouchPy = -1;
+static SDL_Event gEvents[24];
+static unsigned int gEventRead = 0;
+static unsigned int gEventWrite = 0;
+
+static void pushEvent(const SDL_Event& event)
+{
+    const unsigned int next = (gEventWrite + 1) % 24;
+    if (next != gEventRead) {
+        gEvents[gEventWrite] = event;
+        gEventWrite = next;
+    }
+}
+
+static void pushKey(Uint32 type, Uint8 state, SDL_Scancode scancode)
+{
+    SDL_Event event = {};
+    event.key.type = type;
+    event.key.timestamp = SDL_GetTicks();
+    event.key.state = state;
+    event.key.keysym.scancode = scancode;
+    pushEvent(event);
+}
+
+static void pumpNativeInput()
+{
+    scanKeys();
+    const Uint32 down = keysDown();
+    const Uint32 up = keysUp();
+    const Uint32 held = keysHeld();
+    const struct Mapping { Uint32 key; SDL_Scancode scancode; } mappings[] = {
+        { KEY_A, SDL_SCANCODE_RETURN }, { KEY_B, SDL_SCANCODE_ESCAPE },
+        { KEY_X, SDL_SCANCODE_SPACE }, { KEY_Y, SDL_SCANCODE_I },
+        { KEY_START, SDL_SCANCODE_ESCAPE }, { KEY_SELECT, SDL_SCANCODE_TAB },
+        { KEY_UP, SDL_SCANCODE_UP }, { KEY_DOWN, SDL_SCANCODE_DOWN },
+        { KEY_LEFT, SDL_SCANCODE_LEFT }, { KEY_RIGHT, SDL_SCANCODE_RIGHT },
+    };
+    for (const Mapping& mapping : mappings) {
+        if ((down & mapping.key) != 0)
+            pushKey(SDL_KEYDOWN, SDL_PRESSED, mapping.scancode);
+        if ((up & mapping.key) != 0)
+            pushKey(SDL_KEYUP, SDL_RELEASED, mapping.scancode);
+    }
+
+    gMouseButtons = 0;
+    if ((held & KEY_R) != 0) gMouseButtons |= SDL_BUTTON(SDL_BUTTON_LEFT);
+    if ((held & KEY_L) != 0) gMouseButtons |= SDL_BUTTON(SDL_BUTTON_RIGHT);
+
+    const bool touchHeld = (held & KEY_TOUCH) != 0;
+    if (touchHeld) {
+        touchPosition touch = {};
+        touchRead(&touch);
+        int sourceX = 0;
+        int sourceY = 0;
+        fallout::dsiVideoMapTouch(touch.px, touch.py, &sourceX, &sourceY);
+        gRelativeMouseX += sourceX - gVirtualMouseX;
+        gRelativeMouseY += sourceY - gVirtualMouseY;
+        gVirtualMouseX = sourceX;
+        gVirtualMouseY = sourceY;
+
+        if (!gTouchHeld || touch.px != gLastTouchPx || touch.py != gLastTouchPy) {
+            SDL_Event event = {};
+            event.tfinger.type = gTouchHeld ? SDL_FINGERMOTION : SDL_FINGERDOWN;
+            event.tfinger.timestamp = SDL_GetTicks();
+            event.tfinger.fingerId = 1;
+            event.tfinger.x = touch.px / 256.0f;
+            event.tfinger.y = touch.py / 192.0f;
+            event.tfinger.pressure = 1.0f;
+            pushEvent(event);
+        }
+        gLastTouchPx = touch.px;
+        gLastTouchPy = touch.py;
+    } else if (gTouchHeld) {
+        SDL_Event event = {};
+        event.tfinger.type = SDL_FINGERUP;
+        event.tfinger.timestamp = SDL_GetTicks();
+        event.tfinger.fingerId = 1;
+        event.tfinger.x = gVirtualMouseX / 640.0f;
+        event.tfinger.y = gVirtualMouseY / 480.0f;
+        pushEvent(event);
+    }
+    gTouchHeld = touchHeld;
+    if (!touchHeld) {
+        gLastTouchPx = -1;
+        gLastTouchPy = -1;
+    }
+
+    if (!pmMainLoop()) {
+        SDL_Event event = {};
+        event.type = SDL_QUIT;
+        pushEvent(event);
+    }
+}
 
 static void* stubAlloc(size_t size)
 {
@@ -153,6 +257,7 @@ int SDL_SetPaletteColors(SDL_Palette* palette, const SDL_Color* colors, int firs
     if (palette == NULL || palette->colors == NULL || colors == NULL) return -1;
     if (firstcolor < 0 || ncolors < 0 || firstcolor + ncolors > palette->ncolors) return -1;
     memcpy(palette->colors + firstcolor, colors, static_cast<size_t>(ncolors) * sizeof(SDL_Color));
+    fallout::dsiVideoSetPalette(colors, firstcolor, ncolors);
     return 0;
 }
 
@@ -169,17 +274,50 @@ int SDL_SetSurfacePalette(SDL_Surface* surface, SDL_Palette* palette)
     return 0;
 }
 
-int SDL_BlitSurface(SDL_Surface*, const SDL_Rect*, SDL_Surface*, SDL_Rect*) { return 0; }
+int SDL_BlitSurface(SDL_Surface* src, const SDL_Rect* sourceRect,
+    SDL_Surface* dst, SDL_Rect* destinationRect)
+{
+    if (src == NULL || dst == NULL || src->pixels == NULL || dst->pixels == NULL)
+        return -1;
+    SDL_Rect source = sourceRect != NULL ? *sourceRect : SDL_Rect { 0, 0, src->w, src->h };
+    SDL_Rect destination = destinationRect != NULL
+        ? *destinationRect
+        : SDL_Rect { 0, 0, source.w, source.h };
+    const int width = source.w < destination.w ? source.w : destination.w;
+    const int height = source.h < destination.h ? source.h : destination.h;
+    const int srcBytes = src->w > 0 ? src->pitch / src->w : 1;
+    const int dstBytes = dst->w > 0 ? dst->pitch / dst->w : 1;
+    if (srcBytes != dstBytes) return -1;
+    for (int row = 0; row < height; ++row) {
+        const Uint8* sourceRow = static_cast<const Uint8*>(src->pixels)
+            + (source.y + row) * src->pitch + source.x * srcBytes;
+        Uint8* destinationRow = static_cast<Uint8*>(dst->pixels)
+            + (destination.y + row) * dst->pitch + destination.x * dstBytes;
+        memcpy(destinationRow, sourceRow, static_cast<size_t>(width) * srcBytes);
+    }
+    return 0;
+}
 int SDL_LockSurface(SDL_Surface*) { return 0; }
 void SDL_UnlockSurface(SDL_Surface*) { }
 
-int SDL_PollEvent(SDL_Event*) { return 0; }
-void SDL_PumpEvents(void) { }
+int SDL_PollEvent(SDL_Event* event)
+{
+    if (event == NULL) return 0;
+    if (gEventRead == gEventWrite) pumpNativeInput();
+    if (gEventRead == gEventWrite) return 0;
+    *event = gEvents[gEventRead];
+    gEventRead = (gEventRead + 1) % 24;
+    return 1;
+}
+void SDL_PumpEvents(void) { pumpNativeInput(); }
 Uint32 SDL_GetRelativeMouseState(int* x, int* y)
 {
-    if (x != NULL) *x = 0;
-    if (y != NULL) *y = 0;
-    return 0;
+    pumpNativeInput();
+    if (x != NULL) *x = gRelativeMouseX;
+    if (y != NULL) *y = gRelativeMouseY;
+    gRelativeMouseX = 0;
+    gRelativeMouseY = 0;
+    return gMouseButtons;
 }
 int SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
 void SDL_FlushEvents(Uint32, Uint32) { }
@@ -189,28 +327,23 @@ SDL_Keymod SDL_GetModState(void) { return KMOD_NONE; }
 
 Uint32 SDL_GetTicks(void)
 {
-    // Monotonic-enough fake value to avoid obvious infinite waits if the
-    // feasibility ELF is accidentally executed. It is NOT valid timing data.
-    gFakeTicks += 16;
-    return gFakeTicks;
+    return static_cast<Uint32>(osGetTime());
 }
 
 void SDL_Delay(Uint32 ms)
 {
-    gFakeTicks += ms;
+    const Uint32 start = SDL_GetTicks();
+    while (SDL_GetTicks() - start < ms && pmMainLoop()) swiWaitForVBlank();
 }
 
-SDL_TimerID SDL_AddTimer(Uint32, SDL_TimerCallback, void*) { return 1; }
-SDL_bool SDL_RemoveTimer(SDL_TimerID) { return SDL_TRUE; }
+SDL_TimerID SDL_AddTimer(Uint32, SDL_TimerCallback, void*) { return 0; }
+SDL_bool SDL_RemoveTimer(SDL_TimerID) { return SDL_FALSE; }
 
 SDL_AudioDeviceID SDL_OpenAudioDevice(const char*, int, const SDL_AudioSpec* desired,
     SDL_AudioSpec* obtained, int)
 {
-    if (obtained != NULL && desired != NULL) {
-        *obtained = *desired;
-        obtained->silence = 0;
-    }
-    return 1;
+    if (obtained != NULL && desired != NULL) *obtained = *desired;
+    return 0;
 }
 
 void SDL_CloseAudioDevice(SDL_AudioDeviceID) { }
@@ -291,11 +424,11 @@ char* SDL_strdup(const char* s)
     return copy;
 }
 
-char* SDL_GetBasePath(void) { return SDL_strdup("./"); }
-const char* SDL_AndroidGetExternalStoragePath(void) { return "."; }
+char* SDL_GetBasePath(void) { return SDL_strdup("sd:/fallout1/original/"); }
+const char* SDL_AndroidGetExternalStoragePath(void) { return "sd:/fallout1/original/"; }
 void SDL_free(void* p) { free(p); }
 void* SDL_malloc(size_t size) { return malloc(size); }
-const char* SDL_GetError(void) { return "DSi feasibility SDL stub"; }
+const char* SDL_GetError(void) { return "DSi native SDL compatibility layer"; }
 void SDL_SetWindowTitle(SDL_Window*, const char*) { }
 SDL_Cursor* SDL_GetCursor(void) { return NULL; }
 SDL_Cursor* SDL_CreateSystemCursor(int)
@@ -304,7 +437,14 @@ SDL_Cursor* SDL_CreateSystemCursor(int)
 }
 void SDL_SetCursor(SDL_Cursor*) { }
 void SDL_FreeCursor(SDL_Cursor* cursor) { free(cursor); }
-int SDL_ShowSimpleMessageBox(Uint32, const char*, const char*, SDL_Window*) { return 0; }
-void SDL_LogMessageV(int, int, const char*, va_list) { }
+int SDL_ShowSimpleMessageBox(Uint32, const char*, const char* message, SDL_Window*)
+{
+    fallout::dsiFatal(message);
+    return 0;
+}
+void SDL_LogMessageV(int, int, const char* format, va_list args)
+{
+    fallout::dsiLogV(format, args);
+}
 
 } // extern "C"

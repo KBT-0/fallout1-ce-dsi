@@ -1,0 +1,64 @@
+name: DSi Fallout main-menu build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Makefile.dsi"
+      - "src/**"
+      - "third_party/fpattern/vendor/**"
+      - "scripts/ci-dsi-game.sh"
+      - ".github/workflows/dsi-game.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dsi-game:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:20260610
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Mark workspace safe for container git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Ensure Nintendo DS development packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${DEVKITPRO:-/opt/devkitpro}/libnds/lib/libnds9.a" ]] \
+              || [[ ! -f "${DEVKITPRO:-/opt/devkitpro}/portlibs/nds/lib/libfat.a" ]] \
+              || [[ ! -f "${DEVKITPRO:-/opt/devkitpro}/portlibs/nds/lib/libz.a" ]] \
+              || ! command -v ndstool >/dev/null 2>&1; then
+            dkp-pacman -S --needed --noconfirm nds-dev nds-zlib
+          fi
+
+      - name: Build real Fallout CE DSi image
+        shell: bash
+        run: |
+          mkdir -p build
+          bash scripts/ci-dsi-game.sh | tee build/fallout1-dsi-ci.txt
+
+      - name: Record ROM header
+        shell: bash
+        run: ndstool -i build/fallout1-dsi.nds | tee build/fallout1-dsi-header.txt
+
+      - name: Upload playable startup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallout1-dsi-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            build/fallout1-dsi.nds
+            build/fallout1-dsi.elf
+            build/fallout1-dsi.map
+            build/fallout1-dsi-ci.txt
+            build/fallout1-dsi-header.txt

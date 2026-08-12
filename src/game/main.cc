@@ -49,6 +49,10 @@
 #include "platform/ctr/ctr_rectmap.h"
 #endif
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#endif
+
 namespace fallout {
 
 #define DEATH_WINDOW_WIDTH 640
@@ -100,10 +104,17 @@ int gnw_main(int argc, char** argv)
         return 1;
     }
 
+#ifdef __DSI__
+    dsiStartupStage("INTRO_MOVIES_SKIPPED");
+#else
     gmovie_play(MOVIE_IPLOGO, GAME_MOVIE_FADE_IN);
     gmovie_play(MOVIE_INTRO, 0);
+#endif
 
     if (main_menu_create() == 0) {
+#ifdef __DSI__
+        dsiStartupStage("MAIN_MENU_CREATED");
+#endif
         int language_filter = 1;
         bool done = false;
 
@@ -117,6 +128,9 @@ int gnw_main(int argc, char** argv)
             kb_clear();
             gsound_background_play_level_music("07desert", 11);
             main_menu_show(1);
+#ifdef __DSI__
+            dsiStartupStage("MAIN_MENU_VISIBLE");
+#endif
 
             mouse_show();
             int mainMenuRc = main_menu_loop();
@@ -125,7 +139,11 @@ int gnw_main(int argc, char** argv)
             switch (mainMenuRc) {
             case MAIN_MENU_INTRO:
                 main_menu_hide(true);
+#ifdef __DSI__
+                dsiLog("MENU.INTRO=SKIPPED_BOOTSTRAP\n");
+#else
                 gmovie_play(MOVIE_INTRO, GAME_MOVIE_PAUSE_MUSIC);
+#endif
                 break;
             case MAIN_MENU_NEW_GAME:
                 main_menu_hide(true);

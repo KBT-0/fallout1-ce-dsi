@@ -10,6 +10,11 @@
 #include "platform/ctr/ctr_rectmap.h"
 #endif
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#include "platform/dsi/runtime/dsi_video.h"
+#endif
+
 namespace fallout {
 
 static bool createRenderer(int width, int height);
@@ -46,7 +51,7 @@ void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
-#ifndef __3DS__
+#if !defined(__3DS__) && !defined(__DSI__)
         SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
 #endif
     }
@@ -66,7 +71,7 @@ void GNW95_SetPalette(unsigned char* palette)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
-#ifndef __3DS__
+#if !defined(__3DS__) && !defined(__DSI__)
         SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
 #endif
     }
@@ -76,7 +81,9 @@ void GNW95_SetPalette(unsigned char* palette)
 void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, unsigned int srcX, unsigned int srcY, unsigned int srcWidth, unsigned int srcHeight, unsigned int destX, unsigned int destY)
 {
     buf_to_buf(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX, gSdlSurface->pitch);
-#ifndef __3DS__
+#ifdef __DSI__
+    dsiVideoMarkDirty(destX, destY, srcWidth, srcHeight);
+#elif !defined(__3DS__)
     SDL_Rect srcRect;
     srcRect.x = destX;
     srcRect.y = destY;
@@ -92,7 +99,29 @@ void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, 
 
 bool svga_init(VideoOptions* video_options)
 {
-#ifdef __3DS__
+#ifdef __DSI__
+    dsiStartupStage("VIDEO_INIT");
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+        GNWSystemError("Could not initialize DSi video");
+        return false;
+    }
+    if (!dsiVideoInit(video_options->width, video_options->height)) {
+        GNWSystemError("Could not initialize the DSi framebuffer");
+        return false;
+    }
+    gSdlSurface = SDL_CreateRGBSurface(0,
+        video_options->width,
+        video_options->height,
+        8,
+        0,
+        0,
+        0,
+        0);
+    if (gSdlSurface == NULL) {
+        GNWSystemError("Could not allocate the indexed Fallout framebuffer");
+        return false;
+    }
+#elif defined(__3DS__)
     if((SDL_Init(SDL_INIT_VIDEO)==-1)) {
         GNWSystemError("Could not initialize SDL\n");
     }
@@ -183,6 +212,11 @@ void svga_exit()
 {
     destroyRenderer();
 
+    if (gSdlSurface != NULL) {
+        SDL_FreeSurface(gSdlSurface);
+        gSdlSurface = NULL;
+    }
+
     if (gSdlWindow != NULL) {
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
@@ -205,7 +239,7 @@ int screenGetHeight()
 
 static bool createRenderer(int width, int height)
 {
-#ifndef __3DS__
+#if !defined(__3DS__) && !defined(__DSI__)
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
     if (gSdlRenderer == NULL) {
         return false;
@@ -235,7 +269,9 @@ static bool createRenderer(int width, int height)
 
 static void destroyRenderer()
 {
-#ifdef __3DS__
+#ifdef __DSI__
+    dsiVideoExit();
+#elif defined(__3DS__)
     ctr_gfx_exit();
     ctr_rectmap_exit();
 #else
@@ -264,7 +300,9 @@ void handleWindowSizeChanged()
 
 void renderPresent()
 {
-#ifdef __3DS__
+#ifdef __DSI__
+    dsiVideoPresent(gSdlSurface);
+#elif defined(__3DS__)
     ctr_gfx_draw(gSdlSurface);
 #else
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);

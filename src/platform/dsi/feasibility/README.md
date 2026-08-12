@@ -1,14 +1,14 @@
-# DSi feasibility shim
+# DSi native SDL compatibility layer
 
-This directory exists only for PROJECT_v3 Phase 0A.
-
-It is intentionally incomplete and **must not** become the production platform backend.
+This directory began as the PROJECT_v3 Phase 0A link shim. The compatibility
+API is now backed by the native DSi runtime for timing, indexed
+palette/framebuffer presentation, touch, buttons, and silent audio fallback.
 
 Purpose:
 
-1. make `<SDL.h>` references compile without linking a desktop/3DS SDL2;
-2. expose real ARMv5TE compiler/linker failures deeper in the Fallout CE core;
-3. obtain a lower-bound ELF size and linker map.
+1. keep `<SDL.h>` references independent of desktop/3DS SDL2;
+2. retain the accepted Phase 0A lower-bound source contract;
+3. provide the SDL-facing half of the production DSi backend.
 
 Any numeric result produced while this shim is linked must be labeled:
 
@@ -16,4 +16,5 @@ Any numeric result produced while this shim is linked must be labeled:
 LOWER BOUND
 ```
 
-The production port must replace this with real DSi graphics, input, audio, timing and filesystem implementations.
+The `fallout1-dsi.nds` build enables the engine's `__DSI__` paths and pairs
+this API with `src/platform/dsi/runtime/`.

@@ -1,11 +1,8 @@
 #ifndef FALLOUT_DSI_FEASIBILITY_SDL_H_
 #define FALLOUT_DSI_FEASIBILITY_SDL_H_
 
-// Minimal SDL2-shaped compile/link shim for PROJECT_v3 Phase 0A.
-// THIS IS NOT A PRODUCTION SDL IMPLEMENTATION AND IS NOT RUNTIME-SAFE FOR THE
-// GAME. Its only purpose is to let the real Fallout engine reach deeper ARM9
-// compile/link stages so resident code size and missing-platform blockers can
-// be measured.
+// Small SDL2-compatible API surface used by the native DSi backend. This is
+// intentionally limited to the calls made by Fallout CE; it is not SDL2.
 
 #include <stddef.h>
 #include <stdarg.h>

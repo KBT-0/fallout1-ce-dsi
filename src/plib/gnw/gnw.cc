@@ -20,6 +20,10 @@
 #include "3ds.h"
 #endif
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#endif
+
 namespace fallout {
 
 #define MAX_WINDOW_COUNT 50
@@ -1323,7 +1327,9 @@ static int colorClose(void* handle)
 // 0x4C42B8
 bool GNWSystemError(const char* text)
 {
-#ifdef __3DS__
+#ifdef __DSI__
+    dsiFatal(text);
+#elif defined(__3DS__)
     if (!gspHasGpuRight())
         gfxInitDefault();
 

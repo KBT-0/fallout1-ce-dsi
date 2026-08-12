@@ -55,13 +55,15 @@ void debug_register_mono()
 // 0x4B2DD8
 void debug_register_log(const char* fileName, const char* mode)
 {
-    if ((mode[0] == 'w' && mode[1] == 'a') && mode[1] == 't') {
+    if (fileName != NULL && mode != NULL && (mode[0] == 'w' || mode[0] == 'a')) {
         if (fd != NULL) {
             fclose(fd);
         }
 
         fd = compat_fopen(fileName, mode);
-        debug_func = debug_log;
+        if (fd != NULL) {
+            debug_func = debug_log;
+        }
     }
 }
 
