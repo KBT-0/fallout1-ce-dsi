@@ -45,11 +45,13 @@ jobs:
 
       - name: Run host rectmap self-test
         shell: bash
-        run: scripts/test-dsi-bench-host.sh
+        run: bash scripts/test-dsi-bench-host.sh
 
       - name: Build DSi benchmark image
         shell: bash
-        run: scripts/ci-dsi-bench.sh | tee build/dsi-bench-ci.txt
+        run: |
+          mkdir -p build
+          bash scripts/ci-dsi-bench.sh | tee build/dsi-bench-ci.txt
 
       - name: Record ROM header
         shell: bash
