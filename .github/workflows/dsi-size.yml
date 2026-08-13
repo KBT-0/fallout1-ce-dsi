@@ -120,8 +120,8 @@ jobs:
             echo
             echo "=== feasibility inputs ==="
             test -f Makefile.dsi && echo "Makefile.dsi: present" || echo "Makefile.dsi: MISSING"
-            test -f src/platform/dsi/feasibility/include/SDL.h && echo "SDL feasibility header: present" || echo "SDL feasibility header: MISSING"
-            test -f src/platform/dsi/feasibility/sdl_feasibility_stubs.cc && echo "SDL feasibility implementation: present" || echo "SDL feasibility implementation: MISSING"
+            test -f src/platform/dsi/runtime/include/SDL.h && echo "DSi platform header: present" || echo "DSi platform header: MISSING"
+            test -f src/platform/dsi/runtime/dsi_sdl.cc && echo "DSi platform implementation: present" || echo "DSi platform implementation: MISSING"
           } | tee "${CI_OUT}/environment.txt"
 
       - name: Produce source-wide SDL inventory

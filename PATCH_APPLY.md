@@ -6,9 +6,8 @@ Copy/merge the package into the **repository root** so these paths exist:
 Makefile.dsi
 .github/workflows/dsi-size.yml
 scripts/ci-dsi-size.sh
-src/platform/dsi/feasibility/include/SDL.h
-src/platform/dsi/feasibility/include/SDL2/SDL.h
-src/platform/dsi/feasibility/sdl_feasibility_stubs.cc
+src/platform/dsi/runtime/include/SDL.h
+src/platform/dsi/runtime/dsi_sdl.cc
 src/platform/dsi/feasibility/README.md
 ```
 

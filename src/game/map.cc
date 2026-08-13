@@ -41,6 +41,10 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#endif
+
 namespace fallout {
 
 static int map_age_dead_critters();
@@ -323,10 +327,18 @@ int iso_init()
     tile_enable_scroll_blocking();
     tile_enable_scroll_limiting();
 
+#ifdef __DSI__
+    dsiStartupStage("INTERFACE_INIT_BEGIN");
+#endif
     if (intface_init() != 0) {
         debug_printf("intface_init failed in iso_init\n");
         return -1;
     }
+
+#ifdef __DSI__
+    dsiStartupStage("INTERFACE_INIT_OK");
+    dsiLogMemory("05_AFTER_INTERFACE_INITIALIZATION", false);
+#endif
 
     debug_printf(">intface_init\t\t");
 

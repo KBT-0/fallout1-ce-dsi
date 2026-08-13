@@ -661,6 +661,31 @@ DB_FILE* db_fopen(const char* filename, const char* mode)
     return NULL;
 }
 
+DB_FILE* db_fopen_loose(const char* filename, const char* mode)
+{
+    if (current_database == NULL || filename == NULL || mode == NULL
+        || current_database->files_length >= DB_DATABASE_FILE_LIST_CAPACITY) {
+        return NULL;
+    }
+    char path[COMPAT_MAX_PATH];
+    snprintf(path, sizeof(path), "%s", filename);
+    compat_windows_path_to_native(path);
+    FILE* stream = compat_fopen(path, mode);
+    if (stream == NULL) return NULL;
+    int flags = strchr(mode, 'b') != NULL ? 1 : 2;
+    return db_add_fp_rec(stream, NULL, 0, flags | 0x4);
+}
+
+DB_FILE* db_fopen_archive(const char* filename, const char* mode)
+{
+    if (current_database == NULL) return NULL;
+    char* patchesPath = current_database->patches_path;
+    current_database->patches_path = NULL;
+    DB_FILE* stream = db_fopen(filename, mode);
+    current_database->patches_path = patchesPath;
+    return stream;
+}
+
 // 0x4B2664
 int db_fclose(DB_FILE* stream)
 {

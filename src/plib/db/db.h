@@ -31,6 +31,8 @@ void db_exit();
 int db_dir_entry(const char* filePath, dir_entry* de);
 int db_read_to_buf(const char* filePath, unsigned char* ptr);
 DB_FILE* db_fopen(const char* filename, const char* mode);
+DB_FILE* db_fopen_loose(const char* filename, const char* mode);
+DB_FILE* db_fopen_archive(const char* filename, const char* mode);
 int db_fclose(DB_FILE* stream);
 size_t db_fread(void* buf, size_t size, size_t count, DB_FILE* stream);
 int db_fgetc(DB_FILE* stream);

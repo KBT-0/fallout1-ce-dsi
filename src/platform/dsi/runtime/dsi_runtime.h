@@ -11,5 +11,6 @@ const char* dsiLastStartupStage();
 void dsiLog(const char* format, ...);
 void dsiLogV(const char* format, va_list args);
 void dsiFatal(const char* message);
+void dsiLogMemory(const char* checkpoint, bool probeLargestBlock);
 
 } // namespace fallout

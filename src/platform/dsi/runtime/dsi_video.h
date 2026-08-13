@@ -19,5 +19,6 @@ void dsiVideoPresent(const SDL_Surface* indexedSurface);
 void dsiVideoSetStrategy(DsiRenderStrategy strategy);
 DsiRenderStrategy dsiVideoStrategy();
 void dsiVideoMapTouch(int screenX, int screenY, int* sourceX, int* sourceY);
+void dsiVideoRectmapChanged();
 
 } // namespace fallout

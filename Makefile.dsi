@@ -69,8 +69,8 @@ ICON       := $(CALICO)/share/nds-icon.bmp
 
 # -----------------------------------------------------------------------------
 # Source layout mirrors the maintained 3DS Makefile's Fallout core directories,
-# but deliberately excludes src/platform/ctr and substitutes the Phase 0 DSi
-# feasibility shim.
+# but deliberately excludes src/platform/ctr and uses the production DSi
+# platform layer.
 # -----------------------------------------------------------------------------
 CORE_DIRS := \
 	src \
@@ -83,22 +83,18 @@ CORE_DIRS := \
 	src/plib/gnw \
 	third_party/fpattern/vendor
 
-FEAS_DIR := src/platform/dsi/feasibility
 RUNTIME_DIR := src/platform/dsi/runtime
-SOURCE_DIRS := $(CORE_DIRS) $(FEAS_DIR) $(RUNTIME_DIR)
+SOURCE_DIRS := $(CORE_DIRS) $(RUNTIME_DIR)
 
 CORE_C_SOURCES   := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.c))
 CORE_CC_SOURCES  := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cc))
 CORE_CPP_SOURCES := $(foreach d,$(CORE_DIRS),$(wildcard $(d)/*.cpp))
-STUB_C_SOURCES   := $(wildcard $(FEAS_DIR)/*.c)
-STUB_CC_SOURCES  := $(wildcard $(FEAS_DIR)/*.cc)
-STUB_CPP_SOURCES := $(wildcard $(FEAS_DIR)/*.cpp)
 RUNTIME_C_SOURCES   := $(wildcard $(RUNTIME_DIR)/*.c)
 RUNTIME_CC_SOURCES  := $(wildcard $(RUNTIME_DIR)/*.cc)
 RUNTIME_CPP_SOURCES := $(wildcard $(RUNTIME_DIR)/*.cpp)
-C_SOURCES   := $(CORE_C_SOURCES) $(STUB_C_SOURCES) $(RUNTIME_C_SOURCES)
-CC_SOURCES  := $(CORE_CC_SOURCES) $(STUB_CC_SOURCES) $(RUNTIME_CC_SOURCES)
-CPP_SOURCES := $(CORE_CPP_SOURCES) $(STUB_CPP_SOURCES) $(RUNTIME_CPP_SOURCES)
+C_SOURCES   := $(CORE_C_SOURCES) $(RUNTIME_C_SOURCES)
+CC_SOURCES  := $(CORE_CC_SOURCES) $(RUNTIME_CC_SOURCES)
+CPP_SOURCES := $(CORE_CPP_SOURCES) $(RUNTIME_CPP_SOURCES)
 
 C_OBJECTS   := $(patsubst %.c,$(OBJDIR)/%.o,$(C_SOURCES))
 CC_OBJECTS  := $(patsubst %.cc,$(OBJDIR)/%.o,$(CC_SOURCES))
@@ -125,11 +121,12 @@ COMMON_FLAGS := \
 CFLAGS   := $(COMMON_FLAGS)
 CXXFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
-# Stub include path MUST be first so <SDL.h> resolves to the feasibility shim.
-FEAS_INCLUDE := $(TOPDIR)/$(FEAS_DIR)/include
+# The native DSi compatibility facade MUST be first so <SDL.h> resolves to the
+# production engine-facing API instead of a desktop SDL installation.
+DSI_INCLUDE := $(TOPDIR)/$(RUNTIME_DIR)/include
 
 INCLUDE_FLAGS := \
-	-I$(FEAS_INCLUDE) \
+	-I$(DSI_INCLUDE) \
 	$(foreach d,$(CORE_DIRS),-I$(TOPDIR)/$(d)) \
 	-I$(LIBNDS)/include \
 	-I$(CALICO)/include
@@ -206,7 +203,6 @@ print-feasibility-config:
 	@echo "ARCH=$(ARCH)"
 	@echo "CXX=$(CXX)"
 	@echo "Core source files: $(words $(CORE_C_SOURCES) $(CORE_CC_SOURCES) $(CORE_CPP_SOURCES))"
-	@echo "Stub source files: $(words $(STUB_C_SOURCES) $(STUB_CC_SOURCES) $(STUB_CPP_SOURCES))"
 	@echo "Runtime source files: $(words $(RUNTIME_C_SOURCES) $(RUNTIME_CC_SOURCES) $(RUNTIME_CPP_SOURCES))"
 
 $(NDS): $(ELF) $(ARM7_ELF) $(ICON)

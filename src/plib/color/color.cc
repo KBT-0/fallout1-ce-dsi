@@ -8,6 +8,10 @@
 #include "plib/gnw/input.h"
 #include "plib/gnw/svga.h"
 
+#ifdef __DSI__
+#include "platform/dsi/runtime/dsi_runtime.h"
+#endif
+
 namespace fallout {
 
 static void* colorOpen(const char* filePath);
@@ -446,19 +450,25 @@ bool loadColorTable(const char* path)
         return false;
     }
 
+    bool readOk = true;
+    auto readExact = [&](void* buffer, size_t size) {
+        if (!readOk) return;
+        readOk = colorRead(handle, buffer, size) == static_cast<int>(size);
+    };
+
     for (int index = 0; index < 256; index++) {
-        unsigned char r;
-        unsigned char g;
-        unsigned char b;
+        unsigned char r = 0;
+        unsigned char g = 0;
+        unsigned char b = 0;
 
         // NOTE: Uninline.
-        colorRead(handle, &r, sizeof(r));
+        readExact(&r, sizeof(r));
 
         // NOTE: Uninline.
-        colorRead(handle, &g, sizeof(g));
+        readExact(&g, sizeof(g));
 
         // NOTE: Uninline.
-        colorRead(handle, &b, sizeof(b));
+        readExact(&b, sizeof(b));
 
         if (r <= 0x3F && g <= 0x3F && b <= 0x3F) {
             mappedColor[index] = 1;
@@ -475,21 +485,30 @@ bool loadColorTable(const char* path)
     }
 
     // NOTE: Uninline.
-    colorRead(handle, colorTable, 0x8000);
+    readExact(colorTable, 0x8000);
 
-    unsigned int type;
+    unsigned int type = 0;
     // NOTE: Uninline.
-    colorRead(handle, &type, sizeof(type));
+    readExact(&type, sizeof(type));
+
+    if (!readOk) {
+        colorClose(handle);
+        errorStr = _aColor_cColorTa;
+#ifdef __DSI__
+        dsiLog("PALETTE.RESULT=FAIL_TRUNCATED_OR_READ_ERROR\n");
+#endif
+        return false;
+    }
 
     if (type == 'NEWC') {
         // NOTE: Uninline.
-        colorRead(handle, intensityColorTable, 0x10000);
+        readExact(intensityColorTable, 0x10000);
 
         // NOTE: Uninline.
-        colorRead(handle, colorMixAddTable, 0x10000);
+        readExact(colorMixAddTable, 0x10000);
 
         // NOTE: Uninline.
-        colorRead(handle, colorMixMulTable, 0x10000);
+        readExact(colorMixMulTable, 0x10000);
     } else {
         setIntensityTables();
 
@@ -498,10 +517,25 @@ bool loadColorTable(const char* path)
         }
     }
 
+    if (!readOk) {
+        colorClose(handle);
+        errorStr = _aColor_cColorTa;
+#ifdef __DSI__
+        dsiLog("PALETTE.RESULT=FAIL_TRUNCATED_OR_READ_ERROR\n");
+#endif
+        return false;
+    }
+
     rebuildColorBlendTables();
 
     // NOTE: Uninline.
     colorClose(handle);
+
+#ifdef __DSI__
+    dsiLog("PALETTE.FORMAT=%s\n", type == 'NEWC' ? "NEWC_WITH_PRECOMPUTED_TABLES" : "LEGACY_RUNTIME_TABLES");
+    dsiLog("PALETTE.RESULT=LOAD_OK\n");
+    dsiStartupStage("PALETTE_LOAD_OK");
+#endif
 
     return true;
 }
@@ -754,6 +788,7 @@ bool initColors()
     colorGamma(1.0);
 
     if (!loadColorTable("color.pal")) {
+        colorsInited = false;
         return false;
     }
 

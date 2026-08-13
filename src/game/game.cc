@@ -140,6 +140,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 {
     char path[COMPAT_MAX_PATH];
 
+    DSI_STARTUP_STAGE("ENGINE_INIT_BEGIN");
     DSI_STARTUP_STAGE("GMEMORY_INIT");
     if (gmemory_init() == -1) {
         return -1;
@@ -379,7 +380,10 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     debug_printf(">init_options_menu\n");
 
-    DSI_STARTUP_STAGE("GAME_INIT_COMPLETE");
+    DSI_STARTUP_STAGE("ENGINE_INIT_OK");
+#ifdef __DSI__
+    dsiLogMemory("06_AFTER_ENGINE_INITIALIZATION", true);
+#endif
     return 0;
 }
 
@@ -1301,6 +1305,9 @@ static int game_init_databases()
 #endif
         return -1;
     }
+#ifdef __DSI__
+    dsiStartupStage("MASTER_DAT_OPEN");
+#endif
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_DAT_KEY, &main_file_name);
     if (*main_file_name == '\0') {
@@ -1324,6 +1331,10 @@ static int game_init_databases()
 #endif
         return -1;
     }
+#ifdef __DSI__
+    dsiStartupStage("CRITTER_DAT_OPEN");
+    dsiLogMemory("03_AFTER_ARCHIVE_CATALOGS", true);
+#endif
 
     db_select(master_db_handle);
 

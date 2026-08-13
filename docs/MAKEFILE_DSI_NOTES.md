@@ -72,9 +72,8 @@ the Makefile cannot use CMake FetchContent during an offline or isolated build.
 Files:
 
 ```text
-src/platform/dsi/feasibility/include/SDL.h
-src/platform/dsi/feasibility/include/SDL2/SDL.h
-src/platform/dsi/feasibility/sdl_feasibility_stubs.cc
+src/platform/dsi/runtime/include/SDL.h
+src/platform/dsi/runtime/dsi_sdl.cc
 ```
 
 These provide enough SDL2-shaped types/constants/functions to move compilation beyond the obvious desktop SDL dependency and expose deeper ARM9 incompatibilities.

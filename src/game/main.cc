@@ -50,6 +50,7 @@
 #endif
 
 #ifdef __DSI__
+#include "platform/dsi/runtime/dsi_rectmap.h"
 #include "platform/dsi/runtime/dsi_runtime.h"
 #endif
 
@@ -97,10 +98,17 @@ static bool main_death_voiceover_done;
 int gnw_main(int argc, char** argv)
 {
     if (!autorun_mutex_create()) {
+#ifdef __DSI__
+        dsiStartupStage("AUTORUN_MUTEX_FAILED");
+        dsiFatal("Could not initialize the Fallout runtime mutex.");
+#endif
         return 1;
     }
 
     if (!main_init_system(argc, argv)) {
+#ifdef __DSI__
+        dsiFatal("Fallout engine initialization failed. See fallout-dsi.log for the last completed stage.");
+#endif
         return 1;
     }
 
@@ -111,6 +119,10 @@ int gnw_main(int argc, char** argv)
     gmovie_play(MOVIE_INTRO, 0);
 #endif
 
+#ifdef __DSI__
+    dsiStartupStage("MAIN_MENU_BEGIN");
+    dsiRectmapSetMode(DsiRectmapMode::MainMenu);
+#endif
     if (main_menu_create() == 0) {
 #ifdef __DSI__
         dsiStartupStage("MAIN_MENU_CREATED");
@@ -121,6 +133,9 @@ int gnw_main(int argc, char** argv)
         config_get_value(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, &language_filter);
 
         while (!done) {
+#ifdef __DSI__
+            dsiRectmapSetMode(DsiRectmapMode::MainMenu);
+#endif
 #ifdef __3DS__
             if (ctr_rectMap.active != DISPLAY_MAIN)
                 setActiveRectMap(DISPLAY_MAIN);
@@ -130,6 +145,7 @@ int gnw_main(int argc, char** argv)
             main_menu_show(1);
 #ifdef __DSI__
             dsiStartupStage("MAIN_MENU_VISIBLE");
+            dsiLogMemory("07_MAIN_MENU_VISIBLE", false);
 #endif
 
             mouse_show();
@@ -148,6 +164,9 @@ int gnw_main(int argc, char** argv)
             case MAIN_MENU_NEW_GAME:
                 main_menu_hide(true);
                 main_menu_destroy();
+#ifdef __DSI__
+                dsiRectmapSetMode(DsiRectmapMode::Full);
+#endif
 #ifdef __3DS__
                 setActiveRectMap(DISPLAY_CHAR_SELECT);
 #endif
@@ -193,6 +212,9 @@ int gnw_main(int argc, char** argv)
                     } else if (loadGameRc != 0) {
                         win_delete(win);
                         win = -1;
+#ifdef __DSI__
+                        dsiRectmapSetMode(DsiRectmapMode::Field);
+#endif
 #ifdef __3DS__
                         setActiveRectMap(DISPLAY_GUI);
 #endif
@@ -245,6 +267,12 @@ int gnw_main(int argc, char** argv)
             }
         }
     }
+#ifdef __DSI__
+    else {
+        dsiStartupStage("MAIN_MENU_CREATE_FAILED");
+        dsiFatal("Fallout main menu creation failed.");
+    }
+#endif
 
     // NOTE: Uninline.
     main_exit_system();
@@ -346,6 +374,11 @@ static void main_unload_new()
 // 0x472A54
 static void main_game_loop()
 {
+#ifdef __DSI__
+    dsiRectmapSetMode(DsiRectmapMode::Field);
+    dsiStartupStage("GAME_LOOP_ENTERED");
+    dsiLogMemory("08_GAME_LOOP_ENTERED", true);
+#endif
     bool cursorWasHidden = mouse_hidden();
     if (cursorWasHidden) {
         mouse_show();

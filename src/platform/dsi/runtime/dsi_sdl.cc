@@ -1,5 +1,8 @@
 #include <SDL.h>
 
+// Production SDL-compatible facade for Fallout CE on Nintendo DSi. The API is
+// intentionally limited to the subset used by the engine.
+
 #include "platform/dsi/runtime/dsi_runtime.h"
 #include "platform/dsi/runtime/dsi_video.h"
 
@@ -20,9 +23,6 @@ static int gRelativeMouseY = 0;
 static int gVirtualMouseX = 320;
 static int gVirtualMouseY = 240;
 static Uint32 gMouseButtons = 0;
-static bool gTouchHeld = false;
-static int gLastTouchPx = -1;
-static int gLastTouchPy = -1;
 static bool gClockStarted = false;
 static Uint32 gLastClockTicks = 0;
 static Uint64 gAccumulatedClockTicks = 0;
@@ -84,32 +84,10 @@ static void pumpNativeInput()
         gRelativeMouseY += sourceY - gVirtualMouseY;
         gVirtualMouseX = sourceX;
         gVirtualMouseY = sourceY;
-
-        if (!gTouchHeld || touch.px != gLastTouchPx || touch.py != gLastTouchPy) {
-            SDL_Event event = {};
-            event.tfinger.type = gTouchHeld ? SDL_FINGERMOTION : SDL_FINGERDOWN;
-            event.tfinger.timestamp = SDL_GetTicks();
-            event.tfinger.fingerId = 1;
-            event.tfinger.x = touch.px / 256.0f;
-            event.tfinger.y = touch.py / 192.0f;
-            event.tfinger.pressure = 1.0f;
-            pushEvent(event);
-        }
-        gLastTouchPx = touch.px;
-        gLastTouchPy = touch.py;
-    } else if (gTouchHeld) {
-        SDL_Event event = {};
-        event.tfinger.type = SDL_FINGERUP;
-        event.tfinger.timestamp = SDL_GetTicks();
-        event.tfinger.fingerId = 1;
-        event.tfinger.x = gVirtualMouseX / 640.0f;
-        event.tfinger.y = gVirtualMouseY / 480.0f;
-        pushEvent(event);
-    }
-    gTouchHeld = touchHeld;
-    if (!touchHeld) {
-        gLastTouchPx = -1;
-        gLastTouchPy = -1;
+        // Direct touch is the primary left mouse input. Feeding both GNW's
+        // generic gesture queue and the rectmap-relative mouse path would move
+        // the cursor twice using two different coordinate spaces.
+        gMouseButtons |= SDL_BUTTON(SDL_BUTTON_LEFT);
     }
 
     if (!pmMainLoop()) {

@@ -1,5 +1,5 @@
-#ifndef FALLOUT_DSI_FEASIBILITY_SDL_H_
-#define FALLOUT_DSI_FEASIBILITY_SDL_H_
+#ifndef FALLOUT_DSI_RUNTIME_SDL_H_
+#define FALLOUT_DSI_RUNTIME_SDL_H_
 
 // Small SDL2-compatible API surface used by the native DSi backend. This is
 // intentionally limited to the calls made by Fallout CE; it is not SDL2.
