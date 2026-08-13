@@ -439,9 +439,16 @@ static void setMixTable()
 // 0x4C046C
 bool loadColorTable(const char* path)
 {
+    constexpr unsigned int kNewcType = 0x4E455743;
+#ifdef __DSI__
+    constexpr size_t kMandatoryPaletteBytes = 768 + 0x8000;
+#endif
+
 #ifdef __DSI__
     dsiStartupStage("PALETTE_LOAD_BEGIN");
     dsiLog("PALETTE_LOGICAL_NAME=%s\n", path != NULL ? path : "NULL");
+    dsiLog("PALETTE_MANDATORY_BYTES=%lu\n",
+        static_cast<unsigned long>(kMandatoryPaletteBytes));
 #endif
 
     if (colorNameMangler != NULL) {
@@ -458,18 +465,27 @@ bool loadColorTable(const char* path)
         errorStr = _aColor_cColorTa;
 #ifdef __DSI__
         dsiLog("PALETTE_BYTES_READ=0\n");
+        dsiLog("PALETTE_OPTIONAL_TYPE_BYTES=0\n");
+        dsiLog("PALETTE_OPTIONAL_TYPE=NONE\n");
+        dsiLog("PALETTE_GENERATED_INTENSITY_TABLES=NO\n");
+        dsiLog("PALETTE_GENERATED_MIX_TABLES=NO\n");
+        dsiLog("PALETTE_ERROR=DATABASE_OPEN_FAILED\n");
         dsiLog("PALETTE_LOAD_OK=NO\n");
 #endif
         return false;
     }
 
-    bool readOk = true;
     size_t bytesRead = 0;
-    auto readExact = [&](void* buffer, size_t size) {
-        if (!readOk) return;
+    auto readTracked = [&](void* buffer, size_t size) {
         int rc = colorRead(handle, buffer, size);
         if (rc > 0) bytesRead += static_cast<size_t>(rc);
-        readOk = rc == static_cast<int>(size);
+        return rc;
+    };
+
+    bool mandatoryReadOk = true;
+    auto readMandatory = [&](void* buffer, size_t size) {
+        if (!mandatoryReadOk) return;
+        mandatoryReadOk = readTracked(buffer, size) == static_cast<int>(size);
     };
 
     for (int index = 0; index < 256; index++) {
@@ -478,13 +494,13 @@ bool loadColorTable(const char* path)
         unsigned char b = 0;
 
         // NOTE: Uninline.
-        readExact(&r, sizeof(r));
+        readMandatory(&r, sizeof(r));
 
         // NOTE: Uninline.
-        readExact(&g, sizeof(g));
+        readMandatory(&g, sizeof(g));
 
         // NOTE: Uninline.
-        readExact(&b, sizeof(b));
+        readMandatory(&b, sizeof(b));
 
         if (r <= 0x3F && g <= 0x3F && b <= 0x3F) {
             mappedColor[index] = 1;
@@ -501,44 +517,121 @@ bool loadColorTable(const char* path)
     }
 
     // NOTE: Uninline.
-    readExact(colorTable, 0x8000);
+    readMandatory(colorTable, 0x8000);
 
-    unsigned int type = 0;
-    // NOTE: Uninline.
-    readExact(&type, sizeof(type));
-
-    if (!readOk) {
+    if (!mandatoryReadOk) {
         colorClose(handle);
         errorStr = _aColor_cColorTa;
 #ifdef __DSI__
         dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+        dsiLog("PALETTE_OPTIONAL_TYPE_BYTES=0\n");
+        dsiLog("PALETTE_OPTIONAL_TYPE=NONE\n");
+        dsiLog("PALETTE_GENERATED_INTENSITY_TABLES=NO\n");
+        dsiLog("PALETTE_GENERATED_MIX_TABLES=NO\n");
+        dsiLog("PALETTE_ERROR=MANDATORY_PAYLOAD_TRUNCATED\n");
         dsiLog("PALETTE_LOAD_OK=NO\n");
 #endif
         return false;
     }
 
-    if (type == 'NEWC') {
-        // NOTE: Uninline.
-        readExact(intensityColorTable, 0x10000);
+    // The original Fallout palette ends here. Some palettes append a four-byte
+    // NEWC marker followed by precomputed intensity and mix tables. EOF at the
+    // mandatory boundary is therefore a valid legacy palette, not truncation.
+    unsigned int type = 0;
+    int optionalTypeBytes = readTracked(&type, sizeof(type));
+
+#ifdef __DSI__
+    dsiLog("PALETTE_OPTIONAL_TYPE_BYTES=%d\n", optionalTypeBytes);
+    if (optionalTypeBytes == 0) {
+        dsiLog("PALETTE_OPTIONAL_TYPE=NONE\n");
+    } else if (optionalTypeBytes == static_cast<int>(sizeof(type))
+        && type == kNewcType) {
+        dsiLog("PALETTE_OPTIONAL_TYPE=NEWC\n");
+    } else if (optionalTypeBytes == static_cast<int>(sizeof(type))) {
+        dsiLog("PALETTE_OPTIONAL_TYPE=0x%08lX\n",
+            static_cast<unsigned long>(type));
+    } else {
+        dsiLog("PALETTE_OPTIONAL_TYPE=PARTIAL\n");
+    }
+#endif
+
+    if (optionalTypeBytes < 0
+        || (optionalTypeBytes > 0
+            && optionalTypeBytes != static_cast<int>(sizeof(type)))) {
+        colorClose(handle);
+        errorStr = _aColor_cColorTa;
+#ifdef __DSI__
+        dsiLog("PALETTE_FORMAT=INVALID_PARTIAL_EXTENSION\n");
+        dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+        dsiLog("PALETTE_GENERATED_INTENSITY_TABLES=NO\n");
+        dsiLog("PALETTE_GENERATED_MIX_TABLES=NO\n");
+        dsiLog("PALETTE_ERROR=OPTIONAL_TYPE_PARTIAL\n");
+        dsiLog("PALETTE_LOAD_OK=NO\n");
+#endif
+        return false;
+    }
+
+    const bool newc = optionalTypeBytes == static_cast<int>(sizeof(type))
+        && type == kNewcType;
+#ifdef __DSI__
+    dsiLog("PALETTE_FORMAT=%s\n", newc ? "NEWC_EXTENDED" : "LEGACY_33536");
+#endif
+
+    bool extendedReadOk = true;
+#ifdef __DSI__
+    const char* extendedError = NULL;
+#endif
+    if (newc) {
+#ifdef __DSI__
+        dsiLog("PALETTE_GENERATED_INTENSITY_TABLES=NO\n");
+        dsiLog("PALETTE_GENERATED_MIX_TABLES=NO\n");
+#endif
 
         // NOTE: Uninline.
-        readExact(colorMixAddTable, 0x10000);
+        if (readTracked(intensityColorTable, 0x10000) != 0x10000) {
+            extendedReadOk = false;
+#ifdef __DSI__
+            extendedError = "NEWC_INTENSITY_TABLE_TRUNCATED";
+#endif
+        }
 
         // NOTE: Uninline.
-        readExact(colorMixMulTable, 0x10000);
+        if (extendedReadOk
+            && readTracked(colorMixAddTable, 0x10000) != 0x10000) {
+            extendedReadOk = false;
+#ifdef __DSI__
+            extendedError = "NEWC_MIX_ADD_TABLE_TRUNCATED";
+#endif
+        }
+
+        // NOTE: Uninline.
+        if (extendedReadOk
+            && readTracked(colorMixMulTable, 0x10000) != 0x10000) {
+            extendedReadOk = false;
+#ifdef __DSI__
+            extendedError = "NEWC_MIX_MUL_TABLE_TRUNCATED";
+#endif
+        }
     } else {
         setIntensityTables();
+#ifdef __DSI__
+        dsiLog("PALETTE_GENERATED_INTENSITY_TABLES=YES\n");
+#endif
 
         for (int index = 0; index < 256; index++) {
             setMixTableColor(index);
         }
+#ifdef __DSI__
+        dsiLog("PALETTE_GENERATED_MIX_TABLES=YES\n");
+#endif
     }
 
-    if (!readOk) {
+    if (!extendedReadOk) {
         colorClose(handle);
         errorStr = _aColor_cColorTa;
 #ifdef __DSI__
         dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+        dsiLog("PALETTE_ERROR=%s\n", extendedError);
         dsiLog("PALETTE_LOAD_OK=NO\n");
 #endif
         return false;
@@ -550,7 +643,6 @@ bool loadColorTable(const char* path)
     colorClose(handle);
 
 #ifdef __DSI__
-    dsiLog("PALETTE.FORMAT=%s\n", type == 'NEWC' ? "NEWC_WITH_PRECOMPUTED_TABLES" : "LEGACY_RUNTIME_TABLES");
     dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
     dsiLog("PALETTE_LOAD_OK=YES\n");
     dsiStartupStage("PALETTE_LOAD_OK");
