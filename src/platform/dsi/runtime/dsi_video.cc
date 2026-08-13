@@ -147,8 +147,8 @@ bool dsiVideoInit(int sourceWidth, int sourceHeight)
         dsiVideoExit();
         return false;
     }
-    gMainScreen = static_cast<uint8_t*>(bgGetGfxPtr(gMainBackground));
-    gSubScreen = static_cast<uint8_t*>(bgGetGfxPtr(gSubBackground));
+    gMainScreen = reinterpret_cast<uint8_t*>(bgGetGfxPtr(gMainBackground));
+    gSubScreen = reinterpret_cast<uint8_t*>(bgGetGfxPtr(gSubBackground));
     if (gMainScreen == nullptr || gSubScreen == nullptr) {
         dsiVideoExit();
         return false;
