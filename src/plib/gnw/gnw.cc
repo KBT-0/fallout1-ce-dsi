@@ -1,8 +1,11 @@
 #include "plib/gnw/gnw.h"
 
+#include <stdio.h>
+
 #include <algorithm>
 
 #include "game/palette.h"
+#include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/db/db.h"
 #include "plib/gnw/button.h"
