@@ -1,11 +1,8 @@
 #include "plib/gnw/gnw.h"
 
-#include <stdio.h>
-
 #include <algorithm>
 
 #include "game/palette.h"
-#include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/db/db.h"
 #include "plib/gnw/button.h"
@@ -24,8 +21,6 @@
 #endif
 
 #ifdef __DSI__
-#include <errno.h>
-
 #include "game/game.h"
 #include "platform/dsi/runtime/dsi_runtime.h"
 #endif
@@ -1325,65 +1320,24 @@ void win_set_trans_b2b(int id, WindowBlitProc* trans_b2b)
 static void* colorOpen(const char* path)
 {
 #ifdef __DSI__
-    char normalized[COMPAT_MAX_PATH];
-    snprintf(normalized, sizeof(normalized), "%s", path != NULL ? path : "");
-    for (char* cursor = normalized; *cursor != '\0'; ++cursor) {
-        if (*cursor == '\\') *cursor = '/';
-    }
-    dsiStartupStage("PALETTE_LOAD_BEGIN");
-    dsiLog("PALETTE.REQUESTED_LOGICAL_PATH=%s\n", path != NULL ? path : "NULL");
-    dsiLog("PALETTE.NORMALIZED_DSI_PATH=%s\n", normalized);
-
-    DB_DATABASE* previous = db_current();
-    DB_FILE* stream = NULL;
-    const char* selectedSource = NULL;
-    char loosePath[COMPAT_MAX_PATH];
-    snprintf(loosePath, sizeof(loosePath), "data/%s", normalized);
-    errno = 0;
-    stream = db_fopen_loose(loosePath, "rb");
-    dsiLog("PALETTE.LOOSE_DATA.PATH=%s\n", loosePath);
-    dsiLog("PALETTE.LOOSE_DATA.RESULT=%s\n", stream != NULL ? "OPEN_OK" : "NOT_FOUND_OR_OPEN_ERROR");
-    dsiLog("PALETTE.LOOSE_DATA.ERRNO=%d\n", stream != NULL ? 0 : errno);
-    if (stream != NULL) selectedSource = "LOOSE_DATA";
-
+    // Match upstream Fallout CE and the 3DS port: the logical palette name is
+    // resolved by the currently selected database. For normal game startup
+    // this is master_db_handle, whose patch path is data/ and whose archive is
+    // master.dat. COLOR.PAL lives in master.dat's root namespace.
+    DB_FILE* stream = db_fopen(path, "rb");
+    dsiLog("PALETTE_DB_OPEN_RESULT=%s\n", stream != NULL ? "OPEN_OK" : "OPEN_FAILED");
     if (stream == NULL) {
-        errno = 0;
-        stream = db_fopen_loose(normalized, "rb");
-        dsiLog("PALETTE.LOOSE_ROOT.PATH=%s\n", normalized);
-        dsiLog("PALETTE.LOOSE_ROOT.RESULT=%s\n", stream != NULL ? "OPEN_OK" : "NOT_FOUND_OR_OPEN_ERROR");
-        dsiLog("PALETTE.LOOSE_ROOT.ERRNO=%d\n", stream != NULL ? 0 : errno);
-        if (stream != NULL) selectedSource = "LOOSE_INSTALL_ROOT";
+        dsiLog("PALETTE_SOURCE=NONE\n");
     } else {
-        dsiLog("PALETTE.LOOSE_ROOT.RESULT=SKIPPED_LOOSE_DATA_OK\n");
-    }
-
-    if (stream == NULL && master_db_handle != NULL
-        && master_db_handle != INVALID_DATABASE_HANDLE) {
-        db_select(master_db_handle);
-        stream = db_fopen_archive(path, "rb");
-        dsiLog("PALETTE.MASTER_DAT.LOGICAL_PATH=%s\n", path);
-        dsiLog("PALETTE.MASTER_DAT.RESULT=%s\n", stream != NULL ? "OPEN_OK" : "NOT_FOUND_OR_OPEN_ERROR");
-        if (stream != NULL) selectedSource = "MASTER_DAT";
-    } else {
-        dsiLog("PALETTE.MASTER_DAT.RESULT=SKIPPED_EARLIER_SOURCE_OK\n");
-    }
-
-    if (stream == NULL && critter_db_handle != NULL
-        && critter_db_handle != INVALID_DATABASE_HANDLE) {
-        db_select(critter_db_handle);
-        stream = db_fopen_archive(path, "rb");
-        dsiLog("PALETTE.CRITTER_DAT.LOGICAL_PATH=%s\n", path);
-        dsiLog("PALETTE.CRITTER_DAT.RESULT=%s\n", stream != NULL ? "OPEN_OK" : "NOT_FOUND_OR_OPEN_ERROR");
-        if (stream != NULL) selectedSource = "CRITTER_DAT";
-    } else {
-        dsiLog("PALETTE.CRITTER_DAT.RESULT=%s\n",
-            stream != NULL ? "SKIPPED_EARLIER_SOURCE_OK" : "UNAVAILABLE");
-    }
-    if (previous != NULL) db_select(previous);
-    if (stream == NULL) {
-        dsiLog("PALETTE.RESULT=FAIL_ALL_SOURCES\n");
-    } else {
-        dsiLog("PALETTE.SELECTED_SOURCE=%s\n", selectedSource);
+        DB_DATABASE* database = db_file_database(stream);
+        const bool archive = db_file_is_archive(stream);
+        const char* source = "DATABASE_RESOURCE";
+        if (database == master_db_handle) {
+            source = archive ? "MASTER_DAT" : "MASTER_PATCHES";
+        } else if (database == critter_db_handle) {
+            source = archive ? "CRITTER_DAT" : "CRITTER_PATCHES";
+        }
+        dsiLog("PALETTE_SOURCE=%s\n", source);
     }
     return stream;
 #else

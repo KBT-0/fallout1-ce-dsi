@@ -1609,7 +1609,7 @@ void initWindow(VideoOptions* video_options, int flags)
             break;
         case WINDOW_MANAGER_ERR_INITIALIZING_COLOR_TABLE:
             snprintf(err, sizeof(err),
-                "Could not load Fallout color.pal. Checked data/, installation root, master.dat, and critter.dat.\n");
+                "Could not load Fallout color.pal through the configured master database.\n");
             GNWSystemError(err);
             exit(1);
             break;

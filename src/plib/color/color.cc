@@ -439,21 +439,37 @@ static void setMixTable()
 // 0x4C046C
 bool loadColorTable(const char* path)
 {
+#ifdef __DSI__
+    dsiStartupStage("PALETTE_LOAD_BEGIN");
+    dsiLog("PALETTE_LOGICAL_NAME=%s\n", path != NULL ? path : "NULL");
+#endif
+
     if (colorNameMangler != NULL) {
         path = colorNameMangler(path);
     }
+
+#ifdef __DSI__
+    dsiLog("PALETTE_MANGLED_NAME=%s\n", path != NULL ? path : "NULL");
+#endif
 
     // NOTE: Uninline.
     void* handle = colorOpen(path);
     if (handle == nullptr) {
         errorStr = _aColor_cColorTa;
+#ifdef __DSI__
+        dsiLog("PALETTE_BYTES_READ=0\n");
+        dsiLog("PALETTE_LOAD_OK=NO\n");
+#endif
         return false;
     }
 
     bool readOk = true;
+    size_t bytesRead = 0;
     auto readExact = [&](void* buffer, size_t size) {
         if (!readOk) return;
-        readOk = colorRead(handle, buffer, size) == static_cast<int>(size);
+        int rc = colorRead(handle, buffer, size);
+        if (rc > 0) bytesRead += static_cast<size_t>(rc);
+        readOk = rc == static_cast<int>(size);
     };
 
     for (int index = 0; index < 256; index++) {
@@ -495,7 +511,8 @@ bool loadColorTable(const char* path)
         colorClose(handle);
         errorStr = _aColor_cColorTa;
 #ifdef __DSI__
-        dsiLog("PALETTE.RESULT=FAIL_TRUNCATED_OR_READ_ERROR\n");
+        dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+        dsiLog("PALETTE_LOAD_OK=NO\n");
 #endif
         return false;
     }
@@ -521,7 +538,8 @@ bool loadColorTable(const char* path)
         colorClose(handle);
         errorStr = _aColor_cColorTa;
 #ifdef __DSI__
-        dsiLog("PALETTE.RESULT=FAIL_TRUNCATED_OR_READ_ERROR\n");
+        dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+        dsiLog("PALETTE_LOAD_OK=NO\n");
 #endif
         return false;
     }
@@ -533,7 +551,8 @@ bool loadColorTable(const char* path)
 
 #ifdef __DSI__
     dsiLog("PALETTE.FORMAT=%s\n", type == 'NEWC' ? "NEWC_WITH_PRECOMPUTED_TABLES" : "LEGACY_RUNTIME_TABLES");
-    dsiLog("PALETTE.RESULT=LOAD_OK\n");
+    dsiLog("PALETTE_BYTES_READ=%lu\n", static_cast<unsigned long>(bytesRead));
+    dsiLog("PALETTE_LOAD_OK=YES\n");
     dsiStartupStage("PALETTE_LOAD_OK");
 #endif
 
