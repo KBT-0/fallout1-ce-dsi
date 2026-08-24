@@ -55,10 +55,13 @@ static void pumpNativeInput()
     const Uint32 down = keysDown();
     const Uint32 up = keysUp();
     const Uint32 held = keysHeld();
+    if ((down & KEY_SELECT) != 0) {
+        fallout::dsiVideoToggleStrategy();
+    }
     const struct Mapping { Uint32 key; SDL_Scancode scancode; } mappings[] = {
         { KEY_A, SDL_SCANCODE_RETURN }, { KEY_B, SDL_SCANCODE_ESCAPE },
         { KEY_X, SDL_SCANCODE_SPACE }, { KEY_Y, SDL_SCANCODE_I },
-        { KEY_START, SDL_SCANCODE_ESCAPE }, { KEY_SELECT, SDL_SCANCODE_TAB },
+        { KEY_START, SDL_SCANCODE_ESCAPE },
         { KEY_UP, SDL_SCANCODE_UP }, { KEY_DOWN, SDL_SCANCODE_DOWN },
         { KEY_LEFT, SDL_SCANCODE_LEFT }, { KEY_RIGHT, SDL_SCANCODE_RIGHT },
     };
@@ -191,6 +194,8 @@ static SDL_Surface* allocSurface(int width, int height, int depth, Uint32 format
     }
 
     surface->format->format = format;
+    surface->format->BitsPerPixel = static_cast<Uint8>(depth);
+    surface->format->BytesPerPixel = static_cast<Uint8>(depth <= 8 ? 1 : (depth + 7) / 8);
     if (depth == 8) {
         surface->format->palette = static_cast<SDL_Palette*>(stubAlloc(sizeof(SDL_Palette)));
         if (surface->format->palette != NULL) {
@@ -202,8 +207,7 @@ static SDL_Surface* allocSurface(int width, int height, int depth, Uint32 format
 
     surface->w = width;
     surface->h = height;
-    int bytesPerPixel = depth <= 8 ? 1 : (depth + 7) / 8;
-    surface->pitch = width * bytesPerPixel;
+    surface->pitch = width * surface->format->BytesPerPixel;
     surface->pixels = stubAlloc(static_cast<size_t>(surface->pitch) * height);
     return surface;
 }
@@ -238,7 +242,7 @@ int SDL_SetPaletteColors(SDL_Palette* palette, const SDL_Color* colors, int firs
     if (palette == NULL || palette->colors == NULL || colors == NULL) return -1;
     if (firstcolor < 0 || ncolors < 0 || firstcolor + ncolors > palette->ncolors) return -1;
     memcpy(palette->colors + firstcolor, colors, static_cast<size_t>(ncolors) * sizeof(SDL_Color));
-    fallout::dsiVideoSetPalette(colors, firstcolor, ncolors);
+    fallout::dsiVideoSetPalette(palette->colors, firstcolor, ncolors);
     return 0;
 }
 

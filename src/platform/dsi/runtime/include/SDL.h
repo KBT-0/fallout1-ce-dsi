@@ -239,6 +239,8 @@ typedef struct SDL_Palette {
 typedef struct SDL_PixelFormat {
     Uint32 format;
     SDL_Palette* palette;
+    Uint8 BitsPerPixel;
+    Uint8 BytesPerPixel;
 } SDL_PixelFormat;
 
 typedef struct SDL_Surface {

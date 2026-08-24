@@ -6,8 +6,10 @@
 #include <nds.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <malloc.h>
 
 namespace fallout {
 namespace {
@@ -15,7 +17,10 @@ namespace {
 constexpr int kScreenWidth = 256;
 constexpr int kScreenHeight = 192;
 constexpr int kBitmapStride = 256;
-constexpr size_t kBitmapBytes = 256 * 256;
+constexpr size_t kVisibleBytes = kBitmapStride * kScreenHeight;
+constexpr size_t kBitmapBytes = kBitmapStride * 256;
+constexpr uint32_t kFnvOffset = 2166136261U;
+constexpr uint32_t kFnvPrime = 16777619U;
 
 struct DirtyRect {
     int left;
@@ -33,16 +38,112 @@ uint8_t* gMainScreen;
 uint8_t* gSubScreen;
 uint8_t* gMainStage;
 uint8_t* gSubStage;
-u16 gPalette[256];
+alignas(4) u16 gPalette[256];
+alignas(4) SDL_Color gSourcePalette[256];
 bool gPaletteDirty;
 bool gBottomFullDirty;
+bool gSurfaceLogged;
+bool gPaletteEntriesLogged;
+bool gPaletteIsolationLogged;
+bool gFrameLogPending;
+unsigned int gPaletteUpdateSequence;
 DirtyRect gDirty;
-DsiRenderStrategy gStrategy = DsiRenderStrategy::Dirty2D;
+DsiRenderStrategy gStrategy = DsiRenderStrategy::Full2DReference;
+
+const char* renderModeName()
+{
+    return gStrategy == DsiRenderStrategy::Full2DReference
+        ? "FULL_2D_REFERENCE"
+        : "DIRTY_2D";
+}
+
+void hashByte(uint32_t& hash, uint8_t value)
+{
+    hash = (hash ^ value) * kFnvPrime;
+}
+
+uint32_t hashBytes(const uint8_t* bytes, size_t size)
+{
+    uint32_t hash = kFnvOffset;
+    for (size_t index = 0; index < size; ++index) {
+        hashByte(hash, bytes[index]);
+    }
+    return hash;
+}
+
+uint32_t hashSurface(const SDL_Surface* surface)
+{
+    uint32_t hash = kFnvOffset;
+    const auto* pixels = static_cast<const uint8_t*>(surface->pixels);
+    for (int y = 0; y < surface->h; ++y) {
+        const uint8_t* row = pixels + y * surface->pitch;
+        for (int x = 0; x < surface->w; ++x) {
+            hashByte(hash, row[x]);
+        }
+    }
+    return hash;
+}
+
+uint32_t hashVramVisible(const uint8_t* address)
+{
+    uint32_t hash = kFnvOffset;
+    const auto* words = reinterpret_cast<const volatile u16*>(address);
+    for (size_t index = 0; index < kVisibleBytes / sizeof(u16); ++index) {
+        const u16 word = words[index];
+        hashByte(hash, static_cast<uint8_t>(word & 0xFF));
+        hashByte(hash, static_cast<uint8_t>(word >> 8));
+    }
+    return hash;
+}
+
+uint32_t hashSourcePalette()
+{
+    uint32_t hash = kFnvOffset;
+    for (const SDL_Color& color : gSourcePalette) {
+        hashByte(hash, color.r);
+        hashByte(hash, color.g);
+        hashByte(hash, color.b);
+        hashByte(hash, color.a);
+    }
+    return hash;
+}
+
+uint32_t hashRgb15Palette(const volatile u16* palette)
+{
+    uint32_t hash = kFnvOffset;
+    for (int index = 0; index < 256; ++index) {
+        const u16 value = palette[index];
+        hashByte(hash, static_cast<uint8_t>(value & 0xFF));
+        hashByte(hash, static_cast<uint8_t>(value >> 8));
+    }
+    return hash;
+}
+
+bool sourcePaletteIsGrayscale()
+{
+    for (const SDL_Color& color : gSourcePalette) {
+        if (color.r != color.g || color.g != color.b) return false;
+    }
+    return true;
+}
+
+void logPaletteEntries()
+{
+    dsiLog("VIDEO.PALETTE.ENTRY_COUNT=256\n");
+    dsiLog("VIDEO.PALETTE.CHANNEL_ORDER=RGB15_R0_G5_B10\n");
+    for (int index = 0; index < 16; ++index) {
+        const SDL_Color& color = gSourcePalette[index];
+        dsiLog("VIDEO.PALETTE[%02d].SOURCE_RGB=%u,%u,%u RESULT_RGB15=0x%04X\n",
+            index, color.r, color.g, color.b, gPalette[index]);
+    }
+    dsiLog("VIDEO.PALETTE.ALL_256_CONVERTED=YES\n");
+}
 
 void makeFullDirty()
 {
     gDirty = { 0, 0, gSourceWidth, gSourceHeight, true };
     gBottomFullDirty = true;
+    gFrameLogPending = true;
 }
 
 DirtyRect outputDirty(const DirtyRect& sourceDirty,
@@ -80,6 +181,17 @@ DirtyRect outputDirty(const DirtyRect& sourceDirty,
     };
 }
 
+DirtyRect alignedDirty(DirtyRect dirty)
+{
+    if (!dirty.valid) return dirty;
+    dirty.left = std::max(0, dirty.left & ~3);
+    dirty.right = std::min(kScreenWidth, (dirty.right + 3) & ~3);
+    dirty.top = std::max(0, dirty.top);
+    dirty.bottom = std::min(kScreenHeight, dirty.bottom);
+    dirty.valid = dirty.left < dirty.right && dirty.top < dirty.bottom;
+    return dirty;
+}
+
 void stageView(const SDL_Surface* surface, const DsiRectmapView& view,
     DirtyRect dirty, uint8_t* stage)
 {
@@ -106,21 +218,66 @@ void stageView(const SDL_Surface* surface, const DsiRectmapView& view,
     }
 }
 
+void stageFullView(const SDL_Surface* surface, const DsiRectmapView& view,
+    uint8_t* stage)
+{
+    std::memset(stage, 0, kBitmapBytes);
+    const DirtyRect fullView = {
+        view.destinationX,
+        view.destinationY,
+        view.destinationX + view.destinationWidth,
+        view.destinationY + view.destinationHeight,
+        true,
+    };
+    stageView(surface, view, fullView, stage);
+}
+
+void uploadFull(const uint8_t* stage, uint8_t* target)
+{
+    DC_FlushRange(stage, kVisibleBytes);
+    dmaCopyWords(0, stage, target, kVisibleBytes);
+}
+
 void uploadDirty(uint8_t* stage, uint8_t* target, DirtyRect dirty)
 {
     if (!dirty.valid) return;
-    const int left = std::max(0, dirty.left & ~3);
-    const int right = std::min(kScreenWidth, (dirty.right + 3) & ~3);
-    const int top = std::max(0, dirty.top);
-    const int bottom = std::min(kScreenHeight, dirty.bottom);
-    const int width = right - left;
-    if (width <= 0 || top >= bottom) return;
-    for (int y = top; y < bottom; ++y) {
-        uint8_t* source = stage + y * kBitmapStride + left;
-        uint8_t* destination = target + y * kBitmapStride + left;
-        DC_FlushRange(source, width);
+    const int width = dirty.right - dirty.left;
+    DC_FlushRange(stage + dirty.top * kBitmapStride,
+        static_cast<size_t>(dirty.bottom - dirty.top) * kBitmapStride);
+    for (int y = dirty.top; y < dirty.bottom; ++y) {
+        uint8_t* source = stage + y * kBitmapStride + dirty.left;
+        uint8_t* destination = target + y * kBitmapStride + dirty.left;
         dmaCopyWords(0, source, destination, width);
     }
+}
+
+void logSurfaceContract(const SDL_Surface* surface)
+{
+    if (gSurfaceLogged) return;
+    const int bitsPerPixel = surface->format != nullptr
+        ? surface->format->BitsPerPixel
+        : 0;
+    const int bytesPerPixel = surface->format != nullptr
+        ? surface->format->BytesPerPixel
+        : 0;
+    const int paletteEntries = surface->format != nullptr
+            && surface->format->palette != nullptr
+        ? surface->format->palette->ncolors
+        : 0;
+    dsiLog("VIDEO.SOURCE_WIDTH=%d\n", surface->w);
+    dsiLog("VIDEO.SOURCE_HEIGHT=%d\n", surface->h);
+    dsiLog("VIDEO.SOURCE_PITCH=%d\n", surface->pitch);
+    dsiLog("VIDEO.SOURCE_BPP=%d\n", bitsPerPixel);
+    dsiLog("VIDEO.SOURCE_BYTES_PER_PIXEL=%d\n", bytesPerPixel);
+    dsiLog("VIDEO.SOURCE_PALETTE_ENTRIES=%d\n", paletteEntries);
+    dsiLog("VIDEO.SOURCE_CONTRACT=%s\n",
+        surface->w == gSourceWidth && surface->h == gSourceHeight
+                && surface->pitch >= surface->w && bitsPerPixel == 8
+                && bytesPerPixel == 1 && paletteEntries == 256
+            ? "VALID_INDEXED8"
+            : "INVALID");
+    dsiLog("VIDEO.RENDER_MODE=%s\n", renderModeName());
+    gSurfaceLogged = true;
 }
 
 } // namespace
@@ -129,12 +286,14 @@ bool dsiVideoInit(int sourceWidth, int sourceHeight)
 {
     gSourceWidth = sourceWidth;
     gSourceHeight = sourceHeight;
-    gMainStage = static_cast<uint8_t*>(std::calloc(1, kBitmapBytes));
-    gSubStage = static_cast<uint8_t*>(std::calloc(1, kBitmapBytes));
+    gMainStage = static_cast<uint8_t*>(memalign(32, kBitmapBytes));
+    gSubStage = static_cast<uint8_t*>(memalign(32, kBitmapBytes));
     if (gMainStage == nullptr || gSubStage == nullptr) {
         dsiVideoExit();
         return false;
     }
+    std::memset(gMainStage, 0, kBitmapBytes);
+    std::memset(gSubStage, 0, kBitmapBytes);
 
     lcdMainOnTop();
     videoSetMode(MODE_5_2D);
@@ -153,19 +312,36 @@ bool dsiVideoInit(int sourceWidth, int sourceHeight)
         dsiVideoExit();
         return false;
     }
-    std::memset(gMainScreen, 0, kBitmapBytes);
-    std::memset(gSubScreen, 0, kBitmapBytes);
+    DC_FlushRange(gMainStage, kBitmapBytes);
+    DC_FlushRange(gSubStage, kBitmapBytes);
+    dmaCopyWords(0, gMainStage, gMainScreen, kBitmapBytes);
+    dmaCopyWords(0, gSubStage, gSubScreen, kBitmapBytes);
+
     for (int index = 0; index < 256; ++index) {
+        gSourcePalette[index] = {
+            static_cast<Uint8>(index), static_cast<Uint8>(index),
+            static_cast<Uint8>(index), 255,
+        };
         gPalette[index] = RGB15(index >> 3, index >> 3, index >> 3);
     }
     gPaletteDirty = true;
+    gSurfaceLogged = false;
+    gPaletteEntriesLogged = false;
+    gPaletteIsolationLogged = false;
+    gPaletteUpdateSequence = 0;
     dsiRectmapInit(sourceWidth, sourceHeight);
     makeFullDirty();
     bgUpdate();
     dsiLog("VIDEO.SOURCE=%dx%d_INDEXED8\n", sourceWidth, sourceHeight);
     dsiLog("VIDEO.OUTPUT=MAIN_256x192_BG8_SUB_256x192_BG8\n");
-    dsiLog("VIDEO.STRATEGY=DIRTY_2D_RECTMAP\n");
-    dsiLog("VIDEO.FULL_REDRAW_POLICY=ONLY_TRUE_FULL_DIRTY\n");
+    dsiLog("VIDEO.BG_TYPE=BgType_Bmp8\n");
+    dsiLog("VIDEO.BG_SIZE=256x256\n");
+    dsiLog("VIDEO.DESTINATION_STRIDE=256\n");
+    dsiLog("VIDEO.VISIBLE_UPLOAD_BYTES=%u\n", static_cast<unsigned int>(kVisibleBytes));
+    dsiLog("VIDEO.DMA_BYTE_ORDER=U16_LOW_INDEX_THEN_HIGH_INDEX\n");
+    dsiLog("VIDEO.PALETTE_MEMORY_SEPARATE_FROM_BG_VRAM=YES\n");
+    dsiLog("VIDEO.RENDER_MODE=%s\n", renderModeName());
+    dsiLog("VIDEO.SELECT_TOGGLE=FULL_2D_REFERENCE<->DIRTY_2D\n");
     dsiStartupStage("VIDEO_INIT_OK");
     dsiLogMemory("04_AFTER_INDEXED_FRAMEBUFFER_AND_RENDER_STAGING", false);
     return true;
@@ -187,11 +363,39 @@ void dsiVideoSetPalette(const SDL_Color* colors, int first, int count)
 {
     if (colors == nullptr || first < 0 || count < 0 || first + count > 256) return;
     for (int index = 0; index < count; ++index) {
-        const SDL_Color& color = colors[index];
+        const SDL_Color& color = colors[first + index];
+        gSourcePalette[first + index] = color;
         gPalette[first + index] = RGB15(color.r >> 3, color.g >> 3, color.b >> 3);
     }
-    // Indexed VRAM retains pixel indices, so a palette fade never rebuilds or
-    // uploads the 640x480 source.
+    bool allEntriesMatchSdl = true;
+    for (int index = 0; index < 256; ++index) {
+        const SDL_Color& expected = colors[index];
+        const SDL_Color& actual = gSourcePalette[index];
+        if (expected.r != actual.r || expected.g != actual.g
+            || expected.b != actual.b || expected.a != actual.a) {
+            allEntriesMatchSdl = false;
+            break;
+        }
+    }
+    ++gPaletteUpdateSequence;
+    const uint32_t sourceHash = hashSourcePalette();
+    const uint32_t rgb15Hash = hashRgb15Palette(gPalette);
+    dsiLog("VIDEO.PALETTE_UPDATE_SEQUENCE=%u FIRST=%d COUNT=%d\n",
+        gPaletteUpdateSequence, first, count);
+    dsiLog("VIDEO.PALETTE_SOURCE_HASH=0x%08lX\n",
+        static_cast<unsigned long>(sourceHash));
+    dsiLog("VIDEO.PALETTE_RGB15_HASH=0x%08lX\n",
+        static_cast<unsigned long>(rgb15Hash));
+    dsiLog("VIDEO.PALETTE_UPDATE_KIND=%s\n",
+        first == 0 && count == 256 ? "FULL_OR_FADE" : "PARTIAL_OR_FADE");
+    dsiLog("VIDEO.PALETTE_ALL_256_SYNC=%s\n",
+        allEntriesMatchSdl ? "YES" : "NO");
+    if (!gPaletteEntriesLogged && first == 0 && count == 256
+        && !sourcePaletteIsGrayscale()) {
+        logPaletteEntries();
+        gPaletteEntriesLogged = true;
+    }
+    // Indexed VRAM retains pixel indices. Palette fades only upload palette RAM.
     gPaletteDirty = true;
 }
 
@@ -219,33 +423,104 @@ void dsiVideoPresent(const SDL_Surface* surface)
         || gMainScreen == nullptr || gSubScreen == nullptr) {
         return;
     }
-    if (!gDirty.valid && !gPaletteDirty && !gBottomFullDirty) return;
+    logSurfaceContract(surface);
+
+    const bool fullReference = gStrategy == DsiRenderStrategy::Full2DReference;
+    if (!fullReference && !gDirty.valid && !gPaletteDirty && !gBottomFullDirty) return;
 
     const DsiRectmapView mainView = {
         0, 0, gSourceWidth, gSourceHeight, 0, 0, kScreenWidth, kScreenHeight,
     };
     const DsiRectmapView subView = dsiRectmapBottomView();
-    DirtyRect mainDirty = outputDirty(gDirty, mainView,
-        gStrategy == DsiRenderStrategy::CpuFull);
-    DirtyRect subDirty = outputDirty(gDirty, subView,
-        gBottomFullDirty || gStrategy == DsiRenderStrategy::CpuFull);
-    DirtyRect subUploadDirty = subDirty;
-    if (gBottomFullDirty) {
-        std::memset(gSubStage, 0, kBitmapBytes);
-        subUploadDirty = { 0, 0, kScreenWidth, kScreenHeight, true };
+    DirtyRect mainUpload = { 0, 0, kScreenWidth, kScreenHeight, true };
+    DirtyRect subUpload = { 0, 0, kScreenWidth, kScreenHeight, true };
+
+    if (fullReference) {
+        // The reference path deliberately ignores every dirty rectangle.
+        stageFullView(surface, mainView, gMainStage);
+        stageFullView(surface, subView, gSubStage);
+    } else {
+        mainUpload = alignedDirty(outputDirty(gDirty, mainView, false));
+        DirtyRect subStageDirty = alignedDirty(outputDirty(gDirty, subView,
+            gBottomFullDirty));
+        subUpload = subStageDirty;
+        if (gBottomFullDirty) {
+            std::memset(gSubStage, 0, kBitmapBytes);
+            subUpload = { 0, 0, kScreenWidth, kScreenHeight, true };
+        }
+        // Alignment is applied before staging as well as DMA, preventing stale
+        // edge indices when a dirty rectangle is widened to DMA word bounds.
+        stageView(surface, mainView, mainUpload, gMainStage);
+        stageView(surface, subView, subStageDirty, gSubStage);
     }
-    stageView(surface, mainView, mainDirty, gMainStage);
-    stageView(surface, subView, subDirty, gSubStage);
+
+    uint32_t mainStageHash = 0;
+    uint32_t subStageHash = 0;
+    if (gFrameLogPending) {
+        const uint32_t sourceHash = hashSurface(surface);
+        mainStageHash = hashBytes(gMainStage, kVisibleBytes);
+        subStageHash = hashBytes(gSubStage, kVisibleBytes);
+        dsiLog("VIDEO.RENDER_MODE=%s\n", renderModeName());
+        dsiLog("VIDEO.FRAMEBUFFER_SOURCE_HASH=0x%08lX\n",
+            static_cast<unsigned long>(sourceHash));
+        dsiLog("VIDEO.MAIN_STAGING_HASH=0x%08lX\n",
+            static_cast<unsigned long>(mainStageHash));
+        dsiLog("VIDEO.BOTTOM_STAGING_HASH=0x%08lX\n",
+            static_cast<unsigned long>(subStageHash));
+    }
+
+    uint32_t mainBeforePalette = 0;
+    uint32_t subBeforePalette = 0;
+    if (gPaletteDirty && !gPaletteIsolationLogged) {
+        mainBeforePalette = hashVramVisible(gMainScreen);
+        subBeforePalette = hashVramVisible(gSubScreen);
+    }
 
     swiWaitForVBlank();
     if (gPaletteDirty) {
         DC_FlushRange(gPalette, sizeof(gPalette));
         dmaCopyWords(0, gPalette, BG_PALETTE, sizeof(gPalette));
         dmaCopyWords(0, gPalette, BG_PALETTE_SUB, sizeof(gPalette));
+        const uint32_t expectedPaletteHash = hashRgb15Palette(gPalette);
+        const uint32_t mainPaletteHash = hashRgb15Palette(BG_PALETTE);
+        const uint32_t subPaletteHash = hashRgb15Palette(BG_PALETTE_SUB);
+        dsiLog("VIDEO.PALETTE_MAIN_READBACK_HASH=0x%08lX MATCH=%s\n",
+            static_cast<unsigned long>(mainPaletteHash),
+            mainPaletteHash == expectedPaletteHash ? "YES" : "NO");
+        dsiLog("VIDEO.PALETTE_SUB_READBACK_HASH=0x%08lX MATCH=%s\n",
+            static_cast<unsigned long>(subPaletteHash),
+            subPaletteHash == expectedPaletteHash ? "YES" : "NO");
+        if (!gPaletteIsolationLogged) {
+            const uint32_t mainAfterPalette = hashVramVisible(gMainScreen);
+            const uint32_t subAfterPalette = hashVramVisible(gSubScreen);
+            dsiLog("VIDEO.PALETTE_UPLOAD_MAIN_BG_UNCHANGED=%s\n",
+                mainAfterPalette == mainBeforePalette ? "YES" : "NO");
+            dsiLog("VIDEO.PALETTE_UPLOAD_SUB_BG_UNCHANGED=%s\n",
+                subAfterPalette == subBeforePalette ? "YES" : "NO");
+            gPaletteIsolationLogged = true;
+        }
     }
-    uploadDirty(gMainStage, gMainScreen, mainDirty);
-    uploadDirty(gSubStage, gSubScreen, subUploadDirty);
+
+    if (fullReference) {
+        uploadFull(gMainStage, gMainScreen);
+        uploadFull(gSubStage, gSubScreen);
+    } else {
+        uploadDirty(gMainStage, gMainScreen, mainUpload);
+        uploadDirty(gSubStage, gSubScreen, subUpload);
+    }
     bgUpdate();
+
+    if (gFrameLogPending) {
+        const uint32_t mainVramHash = hashVramVisible(gMainScreen);
+        const uint32_t subVramHash = hashVramVisible(gSubScreen);
+        dsiLog("VIDEO.MAIN_VRAM_READBACK_HASH=0x%08lX MATCH_STAGING=%s\n",
+            static_cast<unsigned long>(mainVramHash),
+            mainVramHash == mainStageHash ? "YES" : "NO");
+        dsiLog("VIDEO.BOTTOM_VRAM_READBACK_HASH=0x%08lX MATCH_STAGING=%s\n",
+            static_cast<unsigned long>(subVramHash),
+            subVramHash == subStageHash ? "YES" : "NO");
+        gFrameLogPending = false;
+    }
 
     gDirty.valid = false;
     gPaletteDirty = false;
@@ -256,6 +531,14 @@ void dsiVideoSetStrategy(DsiRenderStrategy strategy)
 {
     gStrategy = strategy;
     makeFullDirty();
+    dsiLog("VIDEO.RENDER_MODE=%s\n", renderModeName());
+}
+
+void dsiVideoToggleStrategy()
+{
+    dsiVideoSetStrategy(gStrategy == DsiRenderStrategy::Full2DReference
+            ? DsiRenderStrategy::Dirty2D
+            : DsiRenderStrategy::Full2DReference);
 }
 
 DsiRenderStrategy dsiVideoStrategy()
@@ -271,6 +554,7 @@ void dsiVideoMapTouch(int screenX, int screenY, int* sourceX, int* sourceY)
 void dsiVideoRectmapChanged()
 {
     gBottomFullDirty = true;
+    gFrameLogPending = true;
 }
 
 } // namespace fallout
