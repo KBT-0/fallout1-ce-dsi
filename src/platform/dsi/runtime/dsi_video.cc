@@ -21,6 +21,7 @@ constexpr size_t kVisibleBytes = kBitmapStride * kScreenHeight;
 constexpr size_t kBitmapBytes = kBitmapStride * 256;
 constexpr uint32_t kFnvOffset = 2166136261U;
 constexpr uint32_t kFnvPrime = 16777619U;
+constexpr unsigned int kPaletteLogLimit = 8;
 
 struct DirtyRect {
     int left;
@@ -367,29 +368,36 @@ void dsiVideoSetPalette(const SDL_Color* colors, int first, int count)
         gSourcePalette[first + index] = color;
         gPalette[first + index] = RGB15(color.r >> 3, color.g >> 3, color.b >> 3);
     }
-    bool allEntriesMatchSdl = true;
-    for (int index = 0; index < 256; ++index) {
-        const SDL_Color& expected = colors[index];
-        const SDL_Color& actual = gSourcePalette[index];
-        if (expected.r != actual.r || expected.g != actual.g
-            || expected.b != actual.b || expected.a != actual.a) {
-            allEntriesMatchSdl = false;
-            break;
+    ++gPaletteUpdateSequence;
+    // Fallout fades the palette every frame. dsiLog fflushes each line to the
+    // SD card, and the two hashes walk 1 KiB, so the diagnostics are capped
+    // instead of running on every fade step.
+    if (gPaletteUpdateSequence <= kPaletteLogLimit) {
+        bool windowMatchesSdl = true;
+        for (int index = 0; index < count; ++index) {
+            const SDL_Color& expected = colors[first + index];
+            const SDL_Color& actual = gSourcePalette[first + index];
+            if (expected.r != actual.r || expected.g != actual.g
+                || expected.b != actual.b || expected.a != actual.a) {
+                windowMatchesSdl = false;
+                break;
+            }
+        }
+        dsiLog("VIDEO.PALETTE_UPDATE_SEQUENCE=%u FIRST=%d COUNT=%d\n",
+            gPaletteUpdateSequence, first, count);
+        dsiLog("VIDEO.PALETTE_SOURCE_HASH=0x%08lX\n",
+            static_cast<unsigned long>(hashSourcePalette()));
+        dsiLog("VIDEO.PALETTE_RGB15_HASH=0x%08lX\n",
+            static_cast<unsigned long>(hashRgb15Palette(gPalette)));
+        dsiLog("VIDEO.PALETTE_UPDATE_KIND=%s\n",
+            first == 0 && count == 256 ? "FULL_OR_FADE" : "PARTIAL_OR_FADE");
+        dsiLog("VIDEO.PALETTE_UPDATED_WINDOW_SYNC=%s\n",
+            windowMatchesSdl ? "YES" : "NO");
+        if (gPaletteUpdateSequence == kPaletteLogLimit) {
+            dsiLog("VIDEO.PALETTE_UPDATE_LOGGING=CAPPED_AFTER_%u\n",
+                kPaletteLogLimit);
         }
     }
-    ++gPaletteUpdateSequence;
-    const uint32_t sourceHash = hashSourcePalette();
-    const uint32_t rgb15Hash = hashRgb15Palette(gPalette);
-    dsiLog("VIDEO.PALETTE_UPDATE_SEQUENCE=%u FIRST=%d COUNT=%d\n",
-        gPaletteUpdateSequence, first, count);
-    dsiLog("VIDEO.PALETTE_SOURCE_HASH=0x%08lX\n",
-        static_cast<unsigned long>(sourceHash));
-    dsiLog("VIDEO.PALETTE_RGB15_HASH=0x%08lX\n",
-        static_cast<unsigned long>(rgb15Hash));
-    dsiLog("VIDEO.PALETTE_UPDATE_KIND=%s\n",
-        first == 0 && count == 256 ? "FULL_OR_FADE" : "PARTIAL_OR_FADE");
-    dsiLog("VIDEO.PALETTE_ALL_256_SYNC=%s\n",
-        allEntriesMatchSdl ? "YES" : "NO");
     if (!gPaletteEntriesLogged && first == 0 && count == 256
         && !sourcePaletteIsGrayscale()) {
         logPaletteEntries();
@@ -481,15 +489,18 @@ void dsiVideoPresent(const SDL_Surface* surface)
         DC_FlushRange(gPalette, sizeof(gPalette));
         dmaCopyWords(0, gPalette, BG_PALETTE, sizeof(gPalette));
         dmaCopyWords(0, gPalette, BG_PALETTE_SUB, sizeof(gPalette));
-        const uint32_t expectedPaletteHash = hashRgb15Palette(gPalette);
-        const uint32_t mainPaletteHash = hashRgb15Palette(BG_PALETTE);
-        const uint32_t subPaletteHash = hashRgb15Palette(BG_PALETTE_SUB);
-        dsiLog("VIDEO.PALETTE_MAIN_READBACK_HASH=0x%08lX MATCH=%s\n",
-            static_cast<unsigned long>(mainPaletteHash),
-            mainPaletteHash == expectedPaletteHash ? "YES" : "NO");
-        dsiLog("VIDEO.PALETTE_SUB_READBACK_HASH=0x%08lX MATCH=%s\n",
-            static_cast<unsigned long>(subPaletteHash),
-            subPaletteHash == expectedPaletteHash ? "YES" : "NO");
+        // Same reason as the update log: a fade makes this per-frame work.
+        if (gPaletteUpdateSequence <= kPaletteLogLimit) {
+            const uint32_t expectedPaletteHash = hashRgb15Palette(gPalette);
+            const uint32_t mainPaletteHash = hashRgb15Palette(BG_PALETTE);
+            const uint32_t subPaletteHash = hashRgb15Palette(BG_PALETTE_SUB);
+            dsiLog("VIDEO.PALETTE_MAIN_READBACK_HASH=0x%08lX MATCH=%s\n",
+                static_cast<unsigned long>(mainPaletteHash),
+                mainPaletteHash == expectedPaletteHash ? "YES" : "NO");
+            dsiLog("VIDEO.PALETTE_SUB_READBACK_HASH=0x%08lX MATCH=%s\n",
+                static_cast<unsigned long>(subPaletteHash),
+                subPaletteHash == expectedPaletteHash ? "YES" : "NO");
+        }
         if (!gPaletteIsolationLogged) {
             const uint32_t mainAfterPalette = hashVramVisible(gMainScreen);
             const uint32_t subAfterPalette = hashVramVisible(gSubScreen);

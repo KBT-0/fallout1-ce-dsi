@@ -8,6 +8,8 @@ on:
       - "src/**"
       - "third_party/fpattern/vendor/**"
       - "scripts/ci-dsi-game.sh"
+      - "scripts/test-dsi-bench-host.sh"
+      - "tests/**"
       - ".github/workflows/dsi-game.yml"
 
 permissions:
@@ -39,6 +41,10 @@ jobs:
               || ! command -v ndstool >/dev/null 2>&1; then
             dkp-pacman -S --needed --noconfirm nds-dev nds-zlib
           fi
+
+      - name: Run host-side DSi tests
+        shell: bash
+        run: bash scripts/test-dsi-bench-host.sh
 
       - name: Build real Fallout CE DSi image
         shell: bash
